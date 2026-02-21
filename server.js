@@ -125,10 +125,19 @@ app.post("/webhooks/orders-create", async (req, res) => {
     let shippingOptions = getMockShippingOptions(order);
 
     // 2️⃣ Let ShipOne decide
-    const selectedOption = chooseBestOption(
-      shippingOptions,
-      order.note_attributes?.shipone_choice || "SMART"
-    );
+   // Shopify Dawn skickar valet i order.attributes
+const shiponeChoice =
+  order.attributes?.shipone_choice ||
+  order.attributes?.ShipOne ||
+  "SMART";
+
+console.log("🚚 ShipOne Choice:", shiponeChoice);
+
+const selectedOption = chooseBestOption(
+  shippingOptions,
+  shiponeChoice.toUpperCase()
+);
+
 
     console.log("---- SHIPONE DECISION ----");
     console.log("Available:", shippingOptions);

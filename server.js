@@ -126,10 +126,26 @@ app.post("/webhooks/orders-create", async (req, res) => {
 
     // 2️⃣ Let ShipOne decide
    // Shopify Dawn skickar valet i order.attributes
-const shiponeChoice =
-  order.attributes?.shipone_choice ||
-  order.attributes?.ShipOne ||
-  "SMART";
+// --- READ CUSTOMER DELIVERY PREFERENCE FROM SHOPIFY ---
+let shiponeChoice = "SMART";
+
+if (order.note_attributes) {
+  const attr = order.note_attributes.find(
+    (a) => a.name === "shipone_delivery"
+  );
+
+  if (attr && attr.value) {
+    shiponeChoice = attr.value;
+  }
+}
+
+// Normalize values coming from theme
+if (shiponeChoice === "FASTEST") shiponeChoice = "FAST";
+if (shiponeChoice === "CHEAPEST") shiponeChoice = "CHEAP";
+if (shiponeChoice === "GREEN") shiponeChoice = "SMART";
+
+console.log("🚚 ShipOne Choice:", shiponeChoice);
+
 
 console.log("🚚 ShipOne Choice:", shiponeChoice);
 

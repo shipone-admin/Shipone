@@ -26,7 +26,13 @@ app.get("/", (req, res) => {
 // CREATE SHIPMENT (PostNord)
 // ================================
 async function createShipment(order) {
+ if (!MOCK_MODE) {
   console.log("📦 Sending shipment to PostNord...");
+  await sendToPostNord(order, selectedOption);
+} else {
+  console.log("🧪 MOCK MODE ACTIVE → Shipment NOT sent to PostNord");
+}
+
 
   const payload = {
     shipment: {

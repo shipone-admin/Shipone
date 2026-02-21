@@ -1,3 +1,6 @@
+// ===== SHIPONE TEST MODE =====
+const MOCK_MODE = true;
+
 const express = require("express");
 const axios = require("axios");
 
@@ -86,3 +89,27 @@ app.post("/webhooks/orders-create", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 ShipOne running on port ${PORT}`);
 });
+function getMockShippingOptions(order) {
+  console.log("📦 Using MOCK shipping (PostNord not active)");
+
+  return [
+    {
+      id: "PN_SERVICE_POINT",
+      name: "Service Point",
+      price: 59,
+      eta_days: 2
+    },
+    {
+      id: "PN_HOME",
+      name: "Home Delivery",
+      price: 79,
+      eta_days: 2
+    },
+    {
+      id: "PN_EXPRESS",
+      name: "Express",
+      price: 109,
+      eta_days: 1
+    }
+  ];
+}

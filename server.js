@@ -3,7 +3,7 @@ const MOCK_MODE = true;
 
 const express = require("express");
 const axios = require("axios");
-
+const { chooseBestOption } = require("./services/routingEngine");
 const app = express();
 app.use(express.json());
 
@@ -68,6 +68,19 @@ async function createShipment(order) {
 app.post("/webhooks/orders-create", async (req, res) => {
   try {
     const order = req.body;
+let shippingOptions;
+
+if (MOCK_MODE) {
+  shippingOptions = getMockShippingOptions(order);
+}
+const selectedOption = chooseBestOption(
+  shippingOptions,
+  order.note_attributes?.shipone_choice || "SMART"
+);
+console.log("---- SHIPONE DECISION ----");
+console.log("Available:", shippingOptions);
+console.log("Selected:", selectedOption);
+console.log("--------------------------");
 
     console.log("📦 NY ORDER:", order.name);
 

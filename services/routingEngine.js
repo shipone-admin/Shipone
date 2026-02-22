@@ -1,40 +1,49 @@
-// 🚚 ShipOne Routing Engine
-// This asks ALL carriers for rates and merges the result.
+// services/routingEngine.js
 
-const carriers = require("../carriers");
+/**
+ * ShipOne Intelligence Engine
+ * Bestämmer vilken frakt som ska väljas
+ */
 
-async function getAllRates(order) {
-  console.log("🚀 RoutingEngine started");
-
-  const results = [];
-
-  for (const carrier of carriers) {
-    try {
-      console.log(`➡️ Asking ${carrier.name} for rates...`);
-
-      const rates = await carrier.getRates(order);
-
-      rates.forEach(rate => {
-        results.push({
-          carrier: carrier.name,
-          service_id: rate.id,
-          service_name: `${carrier.name} – ${rate.name}`,
-          price: rate.price,
-          eta_days: rate.eta_days,
-          co2: rate.co2
-        });
-      });
-
-    } catch (err) {
-      console.log(`⚠️ ${carrier.name} skipped: ${err.message}`);
-    }
+function chooseBestOption(options, choice = "SMART") {
+  if (!options || options.length === 0) {
+    throw new Error("No shipping options provided");
   }
 
-  console.log("✅ Combined rates:", results);
+  console.log("🚚 ShipOne Choice:", choice);
 
-  return results;
+  // -------------------------
+  // CHEAPEST
+  // -------------------------
+  if (choice === "CHEAP") {
+    return options.reduce((cheapest, current) =>
+      current.price < cheapest.price ? current : cheapest
+    );
+  }
+
+  // -------------------------
+  // FASTEST
+  // -------------------------
+  if (choice === "FAST") {
+    return options.reduce((fastest, current) =>
+      current.eta_days < fastest.eta_days ? current : fastest
+    );
+  }
+
+  // -------------------------
+  // SMART (default)
+  // -------------------------
+  return options
+    .map(option => ({
+      ...option,
+      score:
+        option.price * 0.5 +
+        option.eta_days * 30 +
+        (option.co2 || 0) * 10
+    }))
+    .sort((a, b) => a.score - b.score)[0];
 }
 
 module.exports = {
-  getAllRates
+  chooseBestOption
 };

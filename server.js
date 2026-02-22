@@ -1,4 +1,4 @@
-const { getPostNordRates } = require("./carriers/postnord.mock");
+
 // ================================
 // SHIPONE TEST MODE
 // ================================
@@ -9,6 +9,7 @@ const express = require("express");
 const axios = require("axios");
 const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/postnord");
+const { collectRates } = require("./core/rateCollector");
 
 const app = express();
 app.use(express.json());
@@ -49,8 +50,10 @@ app.post("/webhooks/orders-create", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // 1️⃣ Get available shipping options
-    let shippingOptions = getPostNordRates(order);
+   
+   // 1️⃣ Collect rates from all carriers
+let shippingOptions = await collectRates(order);
+
 
 
     // 2️⃣ Let ShipOne decide

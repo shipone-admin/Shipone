@@ -8,6 +8,7 @@ const MOCK_MODE = true; // ← TRUE tills PostNord aktiverar API
 const express = require("express");
 const axios = require("axios");
 const { chooseBestOption } = require("./services/routingEngine");
+const { createShipment } = require("./services/postnord");
 
 const app = express();
 app.use(express.json());
@@ -33,13 +34,7 @@ app.get("/", (req, res) => {
 // ================================
 // CREATE SHIPMENT (REAL POSTNORD)
 // ================================
-async function createShipment(order, selectedOption) {
 
-  // ⛔ STOP entirely if we are in MOCK MODE
-  if (MOCK_MODE) {
-    console.log("🧪 MOCK MODE ACTIVE → Shipment NOT sent to PostNord");
-    return;
-  }
 
   console.log("📦 Sending shipment to PostNord...");
 
@@ -136,7 +131,12 @@ const selectedOption = chooseBestOption(
     console.log("--------------------------");
 
     // 3️⃣ Create shipment (or simulate)
-    await createShipment(order, selectedOption);
+    await createShipment({
+  ...order,
+  shipone_choice: shiponeChoice,
+  selected_service: selectedOption
+});
+
 
     res.sendStatus(200);
   } catch (err) {

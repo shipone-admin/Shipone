@@ -44,4 +44,4 @@ async function createShipment(order) {
 module.exports = {
   createShipment
 };
-add postnord service
+

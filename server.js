@@ -1,3 +1,4 @@
+const { getPostNordRates } = require("./carriers/postnord.mock");
 // ================================
 // SHIPONE TEST MODE
 // ================================
@@ -28,33 +29,6 @@ app.get("/", (req, res) => {
   res.send("ShipOne backend is running");
 });
 
-// ================================
-// MOCK SHIPPING OPTIONS
-// ================================
-function getMockShippingOptions(order) {
-  console.log("📦 Using MOCK shipping (PostNord not active)");
-
-  return [
-    {
-      id: "PN_SERVICE_POINT",
-      name: "Service Point",
-      price: 59,
-      eta_days: 2
-    },
-    {
-      id: "PN_HOME",
-      name: "Home Delivery",
-      price: 79,
-      eta_days: 2
-    },
-    {
-      id: "PN_EXPRESS",
-      name: "Express",
-      price: 109,
-      eta_days: 1
-    }
-  ];
-}
 
 // ================================
 // CREATE SHIPMENT (REAL POSTNORD)
@@ -122,7 +96,8 @@ app.post("/webhooks/orders-create", async (req, res) => {
     }
 
     // 1️⃣ Get available shipping options
-    let shippingOptions = getMockShippingOptions(order);
+    let shippingOptions = getPostNordRates(order);
+
 
     // 2️⃣ Let ShipOne decide
    // Shopify Dawn skickar valet i order.attributes

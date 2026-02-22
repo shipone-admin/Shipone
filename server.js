@@ -35,47 +35,6 @@ app.get("/", (req, res) => {
 // CREATE SHIPMENT (REAL POSTNORD)
 // ================================
 
-
-  console.log("📦 Sending shipment to PostNord...");
-
-  const payload = {
-    shipment: {
-      service: {
-        productCode: "19"
-      },
-      parcels: [
-        {
-          weight: 1000
-        }
-      ],
-      shipper: {
-        customerNumber: CUSTOMER_NUMBER
-      },
-      receiver: {
-        name: `${order.customer.first_name} ${order.customer.last_name}`,
-        addressLine1: order.shipping_address.address1,
-        postalCode: order.shipping_address.zip,
-        city: order.shipping_address.city,
-        countryCode: order.shipping_address.country_code
-      }
-    }
-  };
-
-  const res = await axios.post(
-    `${BASE_URL}/rest/shipment/v1/shipments`,
-    payload,
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "X-IBM-Client-Id": CLIENT_ID,
-        "X-IBM-Client-Secret": CLIENT_SECRET
-      }
-    }
-  );
-
-  console.log("✅ PostNord Response:", res.data);
-}
-
 // ================================
 // SHOPIFY WEBHOOK
 // ================================

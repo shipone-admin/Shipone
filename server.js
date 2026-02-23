@@ -10,7 +10,7 @@ const axios = require("axios");
 const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/postnord");
 const { collectRates } = require("./core/rateCollector");
-const { saveShipment } = require("./services/shipmentStore");
+const shipmentStore = require("./services/shipmentStore");
 
 const app = express();
 app.use(express.json());
@@ -101,7 +101,7 @@ const selectedOption = chooseBestOption(
 });
 
 // Save shipment locally (ShipOne memory)
-await saveShipment({
+await shipmentStore.save({
   order_id: order.id,
   order_name: order.name,
   carrier: selectedOption.carrier,

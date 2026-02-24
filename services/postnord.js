@@ -33,33 +33,42 @@ async function createRealShipment(order) {
   // ---- THIS IS THE IMPORTANT PART ----
   // Payload must match PostNord schema EXACTLY
   const payload = {
-    shipment: {
-      service: {
-        productCode: "19" // Service Point test (we change later dynamically)
-      },
-      parcels: [
-        {
-          weight: 1000
-        }
-      ],
-      shipper: {
-        customerNumber: CUSTOMER_NUMBER
-      },
-      receiver: {
-        name: `${order.customer.first_name} ${order.customer.last_name}`,
-        addressLine1: order.shipping_address.address1,
-        postalCode: order.shipping_address.zip,
-        city: order.shipping_address.city,
-        countryCode: order.shipping_address.country_code
+  shipment: {
+    service: {
+      productCode: "19"
+    },
+
+    transport: {
+      serviceLevelCode: "EXP"
+    },
+
+    parcels: [
+      {
+        weight: 1000
       }
+    ],
+
+    shipper: {
+      customerNumber: CUSTOMER_NUMBER
+    },
+
+    receiver: {
+      name: `${order.customer.first_name} ${order.customer.last_name}`,
+      addressLine1: order.shipping_address.address1,
+      postalCode: order.shipping_address.zip,
+      city: order.shipping_address.city,
+      countryCode: order.shipping_address.country_code
     }
-  };
+  }
+};
+
 
   console.log("📦 PostNord Payload:");
   console.log(JSON.stringify(payload, null, 2));
 
   const response = await axios.post(
-    `${BASE_URL}/rest/shipment/v1/shipments`,
+  `${BASE_URL}/rest/shipment/v3/shipments`,
+
     payload,
     {
       headers: {

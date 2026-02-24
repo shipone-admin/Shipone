@@ -46,27 +46,28 @@ async function getAccessToken() {
 // ===================================
 async function createRealShipment(order) {
   const BASE_URL = process.env.POSTNORD_BASE_URL;
-  const CUSTOMER_NUMBER = process.env.POSTNORD_CUSTOMER_NUMBER;
   const CLIENT_ID = process.env.POSTNORD_CLIENT_ID;
+  const CLIENT_SECRET = process.env.POSTNORD_CLIENT_SECRET;
+  const CUSTOMER_NUMBER = process.env.POSTNORD_CUSTOMER_NUMBER;
 
   const token = await getAccessToken();
 
-  // ✅ THIS IS THE CORRECT CUSTOMER API PAYLOAD
   const payload = {
     shipments: [
       {
         productCode: "19",
 
-        customerNumber: CUSTOMER_NUMBER,
-
-        parcels: [
-          {
-            weight: {
-              value: 1,
-              unit: "kg"
-            }
+        // ✅ THIS IS REQUIRED IN CUSTOMER API
+        consignor: {
+          partyId: CUSTOMER_NUMBER,
+          name: "Your Company Name",   // <-- skriv ditt företagsnamn här
+          address: {
+            street1: "Your Street 1",  // <-- din adress (måste finnas!)
+            postalCode: "12345",
+            city: "Stockholm",
+            countryCode: "SE"
           }
-        ],
+        },
 
         receiver: {
           name: `${order.customer.first_name} ${order.customer.last_name}`,
@@ -76,12 +77,21 @@ async function createRealShipment(order) {
             city: order.shipping_address.city,
             countryCode: order.shipping_address.country_code
           }
-        }
+        },
+
+        parcels: [
+          {
+            weight: {
+              value: 1,
+              unit: "kg"
+            }
+          }
+        ]
       }
     ]
   };
 
-  console.log("📦 Sending payload:");
+  console.log("📦 CORRECT CUSTOMER API PAYLOAD:");
   console.log(JSON.stringify(payload, null, 2));
 
   const response = await axios.post(
@@ -91,12 +101,15 @@ async function createRealShipment(order) {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        "Ocp-Apim-Subscription-Key": CLIENT_ID
+
+        // ✅ THIS is the correct gateway for your account
+        "X-IBM-Client-Id": CLIENT_ID,
+        "X-IBM-Client-Secret": CLIENT_SECRET
       }
     }
   );
 
-  console.log("✅ Shipment created!");
+  console.log("✅ Shipment created:");
   console.log(response.data);
 
   return response.data;

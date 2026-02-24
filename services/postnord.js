@@ -30,60 +30,88 @@ async function createRealShipment(order) {
     throw new Error("Missing PostNord ENV variables");
   }
 
-  // ---- THIS IS THE IMPORTANT PART ----
-  // Payload must match PostNord schema EXACTLY
-  const payload = {
-  shipment: {
-    service: {
-      productCode: "19"
-    },
+  // ==============================
+  // 1️⃣ GET OAUTH TOKEN (REQUIRED)
+  // ==============================
+  console.log("🔑 Fetching OAuth token...");
 
-    transport: {
-      serviceLevelCode: "EXP"
-    },
-
-    parcels: [
-      {
-        weight: 1000
+  const tokenResponse = await axios.post(
+    `${BASE_URL}/oauth2/v2.0/token`,
+    new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      scope: "shipment"
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
       }
-    ],
-
-    shipper: {
-      customerNumber: CUSTOMER_NUMBER
-    },
-
-    receiver: {
-      name: `${order.customer.first_name} ${order.customer.last_name}`,
-      addressLine1: order.shipping_address.address1,
-      postalCode: order.shipping_address.zip,
-      city: order.shipping_address.city,
-      countryCode: order.shipping_address.country_code
     }
-  }
-};
+  );
 
+  const accessToken = tokenResponse.data.access_token;
+  console.log("✅ Token received");
+
+  // ==============================
+  // 2️⃣ CREATE SHIPMENT PAYLOAD
+  // ==============================
+  const payload = {
+    shipment: {
+      service: {
+        productCode: "19"
+      },
+
+      transport: {
+        serviceLevelCode: "EXP"
+      },
+
+      parcels: [
+        {
+          weight: 1000
+        }
+      ],
+
+      shipper: {
+        customerNumber: CUSTOMER_NUMBER
+      },
+
+      receiver: {
+        name: `${order.customer.first_name} ${order.customer.last_name}`,
+        addressLine1: order.shipping_address.address1,
+        postalCode: order.shipping_address.zip,
+        city: order.shipping_address.city,
+        countryCode: order.shipping_address.country_code
+      }
+    }
+  };
 
   console.log("📦 PostNord Payload:");
   console.log(JSON.stringify(payload, null, 2));
 
-  const response = await axios.post(
-  `${BASE_URL}/rest/shipment/v3/shipments`,
+  // ==============================
+  // 3️⃣ SEND TO CUSTOMER API
+  // ==============================
+  const url = `${BASE_URL}/rest/shipment/v1/shipments`;
 
-    payload,
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "X-IBM-Client-Id": CLIENT_ID,
-        "X-IBM-Client-Secret": CLIENT_SECRET
-      }
+  console.log("📡 POST URL:", url);
+
+  const response = await axios.post(url, payload, {
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+
+      // THIS HEADER IS REQUIRED BY APIM GATEWAY
+      "Ocp-Apim-Subscription-Key": CLIENT_ID
     }
-  );
+  });
 
   console.log("✅ PostNord RESPONSE:");
   console.log(response.data);
 
   return response.data;
 }
+
 
 // ==============================
 // MAIN EXPORT

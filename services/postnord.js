@@ -1,4 +1,23 @@
 const axios = require("axios");
+// ========================================
+// ShipOne → PostNord Product Mapping
+// ========================================
+function mapServiceToPostNord(shiponeId) {
+  const mapping = {
+    // ShipOne ID        PostNord ProductCode
+    PN_SERVICE_POINT: "19", // MyPack Collect
+    PN_HOME: "17",          // MyPack Home
+    PN_EXPRESS: "15"        // Express / Parcel
+  };
+
+  const code = mapping[shiponeId];
+
+  if (!code) {
+    throw new Error("Unknown PostNord service: " + shiponeId);
+  }
+
+  return code;
+}
 
 const MOCK_MODE = process.env.MOCK_MODE !== "false";
 
@@ -52,10 +71,15 @@ async function createRealShipment(order) {
 
   const token = await getAccessToken();
 
-  const payload = {
-    shipments: [
-      {
-        productCode: "19",
+  // Convert ShipOne choice → PostNord product
+const productCode = mapServiceToPostNord(order.shipone_choice.id);
+
+const payload = {
+  shipment: {
+    service: {
+      productCode: productCode
+    },
+
 
         // ✅ THIS IS REQUIRED IN CUSTOMER API
         consignor: {

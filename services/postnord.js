@@ -1,47 +1,45 @@
 const axios = require("axios");
-// ========================================
-// ShipOne → PostNord Product Mapping
-// ========================================
-function mapServiceToPostNord(shiponeId) {
-  const mapping = {
-    // ShipOne ID        PostNord ProductCode
-    PN_SERVICE_POINT: "19", // MyPack Collect
-    PN_HOME: "17",          // MyPack Home
-    PN_EXPRESS: "15"        // Express / Parcel
-  };
-
-  const code = mapping[shiponeId];
-
-  if (!code) {
-    throw new Error("Unknown PostNord service: " + shiponeId);
-  }
-
-  return code;
-}
 
 const MOCK_MODE = process.env.MOCK_MODE !== "false";
 
-// ===================================
-// MOCK MODE
-// ===================================
+// =====================================================
+// ShipOne → PostNord Product Mapping (CRITICAL)
+// =====================================================
+function mapServiceToPostNord(shiponeId) {
+  const mapping = {
+    PN_SERVICE_POINT: "19", // MyPack Collect
+    PN_HOME: "17",          // MyPack Home
+    PN_EXPRESS: "15"        // Express
+  };
+
+  if (!mapping[shiponeId]) {
+    throw new Error("❌ Unknown ShipOne service: " + shiponeId);
+  }
+
+  return mapping[shiponeId];
+}
+
+// =====================================================
+// MOCK MODE (used while debugging)
+// =====================================================
 function mockShipment(order) {
-  console.log("🧪 MOCK MODE ACTIVE → Shipment NOT sent to PostNord");
+  console.log("🧪 MOCK SHIPMENT (nothing sent to PostNord)");
 
   return {
     tracking_number: "MOCK123456",
-    service: order.shipone_choice,
+    service: order.shipone_choice
   };
 }
 
-// ===================================
-// GET OAUTH TOKEN (Customer API auth)
-// ===================================
+// =====================================================
+// STEP 1 — GET OAUTH TOKEN (Customer API requires this)
+// =====================================================
 async function getAccessToken() {
   const BASE_URL = process.env.POSTNORD_BASE_URL;
   const CLIENT_ID = process.env.POSTNORD_CLIENT_ID;
   const CLIENT_SECRET = process.env.POSTNORD_CLIENT_SECRET;
 
-  console.log("🔑 Fetching OAuth token...");
+  console.log("🔑 Requesting OAuth token...");
 
   const response = await axios.post(
     `${BASE_URL}/oauth2/v2.0/token`,
@@ -52,48 +50,51 @@ async function getAccessToken() {
       scope: "shipment"
     }),
     {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      }
     }
   );
 
-  console.log("✅ OAuth token OK");
+  console.log("✅ OAuth token received");
   return response.data.access_token;
 }
 
-// ===================================
-// CREATE SHIPMENT (Customer API)
-// ===================================
+// =====================================================
+// STEP 2 — CREATE SHIPMENT (Customer API)
+// =====================================================
 async function createRealShipment(order) {
   const BASE_URL = process.env.POSTNORD_BASE_URL;
   const CLIENT_ID = process.env.POSTNORD_CLIENT_ID;
   const CLIENT_SECRET = process.env.POSTNORD_CLIENT_SECRET;
   const CUSTOMER_NUMBER = process.env.POSTNORD_CUSTOMER_NUMBER;
 
+  if (!order.shipone_choice || !order.shipone_choice.id) {
+    throw new Error("ShipOne choice missing on order");
+  }
+
+  // 🔥 Translate ShipOne → PostNord
+  const productCode = mapServiceToPostNord(order.shipone_choice.id);
+
+  console.log("📦 Using PostNord productCode:", productCode);
+
   const token = await getAccessToken();
 
-  // Convert ShipOne choice → PostNord product
-const productCode = mapServiceToPostNord(order.shipone_choice.id);
+  // =====================================================
+  // THIS STRUCTURE MATCHES CUSTOMER API (NOT OLD API)
+  // =====================================================
+  const payload = {
+    shipment: {
+      product: {
+        productCode: productCode
+      },
 
-const payload = {
-  shipment: {
-    service: {
-      productCode: productCode
-    },
-
-
-        // ✅ THIS IS REQUIRED IN CUSTOMER API
+      parties: {
         consignor: {
-          partyId: CUSTOMER_NUMBER,
-          name: "Your Company Name",   // <-- skriv ditt företagsnamn här
-          address: {
-            street1: "Your Street 1",  // <-- din adress (måste finnas!)
-            postalCode: "12345",
-            city: "Stockholm",
-            countryCode: "SE"
-          }
+          partyId: CUSTOMER_NUMBER
         },
 
-        receiver: {
+        consignee: {
           name: `${order.customer.first_name} ${order.customer.last_name}`,
           address: {
             street1: order.shipping_address.address1,
@@ -101,21 +102,21 @@ const payload = {
             city: order.shipping_address.city,
             countryCode: order.shipping_address.country_code
           }
-        },
+        }
+      },
 
-        parcels: [
-          {
-            weight: {
-              value: 1,
-              unit: "kg"
-            }
+      parcels: [
+        {
+          weight: {
+            value: 1,
+            unit: "kg"
           }
-        ]
-      }
-    ]
+        }
+      ]
+    }
   };
 
-  console.log("📦 CORRECT CUSTOMER API PAYLOAD:");
+  console.log("📡 Sending shipment to PostNord...");
   console.log(JSON.stringify(payload, null, 2));
 
   const response = await axios.post(
@@ -125,21 +126,17 @@ const payload = {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-
-        // ✅ THIS is the correct gateway for your account
         "X-IBM-Client-Id": CLIENT_ID,
         "X-IBM-Client-Secret": CLIENT_SECRET
       }
     }
   );
 
-  console.log("✅ Shipment created:");
-  console.log(response.data);
-
+  console.log("✅ Shipment created successfully");
   return response.data;
 }
 
-// ===================================
+// =====================================================
 async function createShipment(order) {
   if (MOCK_MODE) return mockShipment(order);
   return await createRealShipment(order);

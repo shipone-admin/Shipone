@@ -1,12 +1,7 @@
-
 // ================================
-// SHIPONE TEST MODE
-// ================================
-const MOCK_MODE = true; // ← TRUE tills PostNord aktiverar API
-
+// SHIPONE BACKEND
 // ================================
 const express = require("express");
-const axios = require("axios");
 const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/postnord");
 const { collectRates } = require("./core/rateCollector");
@@ -18,24 +13,11 @@ app.use(express.json());
 const PORT = process.env.PORT || 8080;
 
 // ================================
-// ENV (Railway Variables)
-// ================================
-const CLIENT_ID = process.env.POSTNORD_CLIENT_ID;
-const CLIENT_SECRET = process.env.POSTNORD_CLIENT_SECRET;
-const CUSTOMER_NUMBER = process.env.POSTNORD_CUSTOMER_NUMBER;
-const BASE_URL = process.env.POSTNORD_BASE_URL;
-
-// ================================
 // HEALTH CHECK
 // ================================
 app.get("/", (req, res) => {
   res.send("ShipOne backend is running");
 });
-
-
-// ================================
-// CREATE SHIPMENT (REAL POSTNORD)
-// ================================
 
 // ================================
 // SHOPIFY WEBHOOK
@@ -51,72 +33,67 @@ app.post("/webhooks/orders-create", async (req, res) => {
       return res.sendStatus(200);
     }
 
-   
-   // 1️⃣ Collect rates from all carriers
-let shippingOptions = await collectRates(order);
+    // ============================
+    // 1️⃣ COLLECT ALL RATES
+    // ============================
+    const shippingOptions = await collectRates(order);
 
+    // ============================
+    // 2️⃣ READ CUSTOMER PREFERENCE
+    // ============================
+    let shiponePreference = "SMART";
 
+    if (order.note_attributes) {
+      const attr = order.note_attributes.find(
+        (a) => a.name === "shipone_delivery"
+      );
 
-    // 2️⃣ Let ShipOne decide
-   // Shopify Dawn skickar valet i order.attributes
-// --- READ CUSTOMER DELIVERY PREFERENCE FROM SHOPIFY ---
-let shiponeChoice = "SMART";
+      if (attr && attr.value) {
+        shiponePreference = attr.value;
+      }
+    }
 
-if (order.note_attributes) {
-  const attr = order.note_attributes.find(
-    (a) => a.name === "shipone_delivery"
-  );
+    if (shiponePreference === "FASTEST") shiponePreference = "FAST";
+    if (shiponePreference === "CHEAPEST") shiponePreference = "CHEAP";
+    if (shiponePreference === "GREEN") shiponePreference = "SMART";
 
-  if (attr && attr.value) {
-    shiponeChoice = attr.value;
-  }
-}
+    console.log("🚚 ShipOne Choice:", shiponePreference);
 
-// Normalize values coming from theme
-if (shiponeChoice === "FASTEST") shiponeChoice = "FAST";
-if (shiponeChoice === "CHEAPEST") shiponeChoice = "CHEAP";
-if (shiponeChoice === "GREEN") shiponeChoice = "SMART";
-
-console.log("🚚 ShipOne Choice:", shiponeChoice);
-
-
-console.log("🚚 ShipOne Choice:", shiponeChoice);
-
-const selectedOption = chooseBestOption(
-  shippingOptions,
-  shiponeChoice.toUpperCase()
-);
-
+    // ============================
+    // 3️⃣ LET SHIPONE DECIDE
+    // ============================
+    const selectedOption = chooseBestOption(
+      shippingOptions,
+      shiponePreference.toUpperCase()
+    );
 
     console.log("---- SHIPONE DECISION ----");
-    console.log("Available:", shippingOptions);
     console.log("Selected:", selectedOption);
-    // Attach ShipOne decision to order so carriers can use it
-order.shipone_choice = decision;
-
     console.log("--------------------------");
 
-    // 3️⃣ Create shipment (or simulate)
-    const shipmentResult = await createShipment({
-  ...order,
-  shipone_choice: shiponeChoice,
-  selected_service: selectedOption
-});
+    // ✅ THIS IS THE IMPORTANT FIX
+    // We attach the FULL selected option to the order
+    order.shipone_choice = selectedOption;
 
-// Save shipment locally (ShipOne memory)
-await shipmentStore.save({
-  order_id: order.id,
-  order_name: order.name,
-  carrier: selectedOption.carrier,
-  service: selectedOption.name,
-  price: selectedOption.price,
-  eta_days: selectedOption.eta_days,
-  co2: selectedOption.co2,
-  tracking_number: shipmentResult.tracking_number,
-  created_at: new Date().toISOString()
-});
+    // ============================
+    // 4️⃣ CREATE SHIPMENT
+    // ============================
+    const shipmentResult = await createShipment(order);
 
-
+    // ============================
+    // 5️⃣ SAVE INTERNALLY (ShipOne memory)
+    // ============================
+    await shipmentStore.save({
+      order_id: order.id,
+      order_name: order.name,
+      carrier: selectedOption.carrier,
+      service: selectedOption.name,
+      price: selectedOption.price,
+      eta_days: selectedOption.eta_days,
+      co2: selectedOption.co2,
+      tracking_number: shipmentResult.tracking_number,
+      created_at: new Date().toISOString()
+    });
 
     res.sendStatus(200);
   } catch (err) {

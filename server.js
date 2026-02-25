@@ -104,6 +104,22 @@ app.post("/webhooks/orders-create", async (req, res) => {
 });
 
 // ================================
+// ================================
+// ADMIN: View Shipments
+// ================================
+app.get("/admin/shipments", (req, res) => {
+  const data = shipmentStore.getAll();
+  res.json(data);
+});
+
+// ================================
+// ADMIN: Stats
+// ================================
+app.get("/admin/stats", (req, res) => {
+  const stats = shipmentStore.stats();
+  res.json(stats);
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 ShipOne running on port ${PORT}`);
 });

@@ -3,6 +3,11 @@ const path = require("path");
 
 const FILE = path.join(__dirname, "../data/shipments.json");
 
+// Ensure file exists
+if (!fs.existsSync(FILE)) {
+  fs.writeFileSync(FILE, JSON.stringify([]));
+}
+
 // Read all shipments
 function getAll() {
   const raw = fs.readFileSync(FILE);
@@ -10,20 +15,28 @@ function getAll() {
 }
 
 // Save new shipment
-function save(shipment) {
-  const all = getAll();
-  all.push(shipment);
-  fs.writeFileSync(FILE, JSON.stringify(all, null, 2));
+async function save(shipment) {
+  const data = getAll();
+  data.push(shipment);
+  fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
-// Check if order already processed (idempotency base)
-function exists(orderId) {
-  const all = getAll();
-  return all.some(s => s.order_id === orderId);
+// Stats (this becomes powerful later)
+function stats() {
+  const data = getAll();
+
+  return {
+    total_orders: data.length,
+    carriers: groupBy(data, "carrier"),
+    services: groupBy(data, "service")
+  };
 }
 
-module.exports = {
-  save,
-  exists,
-  getAll
-};
+function groupBy(arr, key) {
+  return arr.reduce((acc, item) => {
+    acc[item[key]] = (acc[item[key]] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+module.exports = { save, getAll, stats };

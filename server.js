@@ -91,6 +91,9 @@ const selectedOption = chooseBestOption(
     console.log("---- SHIPONE DECISION ----");
     console.log("Available:", shippingOptions);
     console.log("Selected:", selectedOption);
+    // Attach ShipOne decision to order so carriers can use it
+order.shipone_choice = decision;
+
     console.log("--------------------------");
 
     // 3️⃣ Create shipment (or simulate)

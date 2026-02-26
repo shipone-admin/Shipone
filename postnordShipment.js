@@ -1,4 +1,4 @@
-import axios from "axios";
+const axios = require("axios");
 
 const BASE_URL = process.env.POSTNORD_BASE_URL;
 const CLIENT_ID = process.env.POSTNORD_CLIENT_ID;
@@ -39,27 +39,24 @@ async function getAccessToken() {
 // ============================
 // CREATE SHIPMENT
 // ============================
-export async function createShipment(order) {
+async function createShipment(order) {
   const token = await getAccessToken();
-
   const addr = order.shipping_address;
 
   const payload = {
     shipments: [
       {
-        product: {
-          productCode: "19"   // MyPack Collect (stable test service)
-        },
+        product: { productCode: "19" },
         parties: {
           shipper: {
             name: "ShipOne",
+            customerNumber: CUSTOMER_NUMBER,
             address: {
               street1: process.env.SHIPPER_STREET,
               postalCode: process.env.SHIPPER_ZIP,
               city: process.env.SHIPPER_CITY,
               countryCode: "SE"
-            },
-            customerNumber: CUSTOMER_NUMBER
+            }
           },
           receiver: {
             name: `${addr.first_name} ${addr.last_name}`,
@@ -73,10 +70,7 @@ export async function createShipment(order) {
         },
         parcels: [
           {
-            weight: {
-              value: 1,
-              unit: "kg"
-            }
+            weight: { value: 1, unit: "kg" }
           }
         ]
       }
@@ -99,6 +93,9 @@ export async function createShipment(order) {
   console.log("✅ PostNord OK");
 
   return {
-    tracking_number: res.data.shipments?.[0]?.trackingNumbers?.[0] || "pending"
+    tracking_number:
+      res.data.shipments?.[0]?.trackingNumbers?.[0] || "pending"
   };
 }
+
+module.exports = { createShipment };

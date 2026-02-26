@@ -1,13 +1,13 @@
 const axios = require("axios");
 
 // =====================================================
-// ShipOne → PostNord EDI Service Mapping
+// ShipOne → PostNord Service Mapping (EDI)
 // =====================================================
 function mapServiceToBasicCode(shiponeId) {
   const mapping = {
-    PN_SERVICE_POINT: "19", // MyPack Collect
-    PN_HOME: "17",          // MyPack Home
-    PN_EXPRESS: "18"        // Parcel (det PostNord bad dig testa!)
+    PN_SERVICE_POINT: "19", // Collect
+    PN_HOME: "17",          // Home
+    PN_EXPRESS: "18"        // Parcel (PostNord recommended)
   };
 
   if (!mapping[shiponeId]) {
@@ -18,7 +18,7 @@ function mapServiceToBasicCode(shiponeId) {
 }
 
 // =====================================================
-// BUILD EDI PAYLOAD (THIS is the correct API)
+// BUILD MINIMAL VALID EDI PAYLOAD (for SaaS / Webshop)
 // =====================================================
 function buildPayload(order, basicServiceCode) {
   const now = new Date().toISOString();
@@ -29,7 +29,7 @@ function buildPayload(order, basicServiceCode) {
     messageId: `SHIPONE_${Date.now()}`,
 
     application: {
-      applicationId: 9999,
+      applicationId: 1,
       name: "ShipOne",
       version: "1.0"
     },
@@ -39,7 +39,7 @@ function buildPayload(order, basicServiceCode) {
     shipment: [
       {
         shipmentIdentification: {
-          shipmentId: order.id.toString()
+          shipmentId: String(order.id)
         },
 
         dateAndTimes: {
@@ -89,20 +89,19 @@ function buildPayload(order, basicServiceCode) {
                 postalCode: order.shipping_address.zip.replace(/\s/g, ""),
                 city: order.shipping_address.city,
                 countryCode: order.shipping_address.country_code
-              },
-              contact: {
-                emailAddress: order.email || "test@test.se"
               }
             }
           }
         },
 
-     goodsItem: [
-  {
-    packageTypeCode: "PC"
-  }
-]
-
+        // ✅ MINIMAL goodsItem — NO SSCC, NO items
+        goodsItem: [
+          {
+            packageTypeCode: "PC"
+          }
+        ]
+      }
+    ]
   };
 }
 
@@ -110,34 +109,41 @@ function buildPayload(order, basicServiceCode) {
 // CREATE SHIPMENT (EDI v3)
 // =====================================================
 async function createShipment(order) {
+  if (!order.shipone_choice?.id) {
+    throw new Error("ShipOne choice missing");
+  }
+
   const BASE_URL = process.env.POSTNORD_BASE_URL;
+  const CLIENT_ID = process.env.POSTNORD_CLIENT_ID;
+  const CLIENT_SECRET = process.env.POSTNORD_CLIENT_SECRET;
 
   const basicServiceCode = mapServiceToBasicCode(order.shipone_choice.id);
 
   console.log("📦 Using basicServiceCode:", basicServiceCode);
 
- const payload = buildPayload(order, basicServiceCode);
+  const payload = buildPayload(order, basicServiceCode);
 
-// 🔒 Convert to CLEAN JSON STRING (prevents corruption)
-const jsonBody = JSON.stringify(payload);
+  console.log("📡 Sending EDI v3 request to PostNord...");
+  console.log(JSON.stringify(payload, null, 2));
 
-console.log("📡 Sending EDI v3 request to PostNord...");
+  const response = await axios.post(
+    `${BASE_URL}/rest/shipment/v3/edi`,
+    payload,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "X-IBM-Client-Id": CLIENT_ID,
+        "X-IBM-Client-Secret": CLIENT_SECRET
+      },
+      maxBodyLength: Infinity
+    }
+  );
 
-const response = await axios({
-  method: "post",
-  url: `${BASE_URL}/rest/shipment/v3/edi`,
-  data: jsonBody,
-  maxBodyLength: Infinity,
-  headers: {
-    "Content-Type": "application/json",
-    "Content-Length": Buffer.byteLength(jsonBody),
-    "X-IBM-Client-Id": process.env.POSTNORD_CLIENT_ID,
-    "X-IBM-Client-Secret": process.env.POSTNORD_CLIENT_SECRET
-  }
-});
+  console.log("✅ PostNord accepted shipment");
 
-  console.log("✅ PostNord accepted EDI shipment");
-  return { tracking_number: order.id.toString() };
+  return {
+    tracking_number: response.data?.shipmentId || String(order.id)
+  };
 }
 
 module.exports = { createShipment };

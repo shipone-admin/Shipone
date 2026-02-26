@@ -1,13 +1,13 @@
 const axios = require("axios");
 
 // =====================================================
-// ShipOne → PostNord Product Mapping (Customer API)
+// ShipOne → PostNord EDI Service Mapping
 // =====================================================
-function mapServiceToProductCode(shiponeId) {
+function mapServiceToBasicCode(shiponeId) {
   const mapping = {
     PN_SERVICE_POINT: "19", // MyPack Collect
     PN_HOME: "17",          // MyPack Home
-    PN_EXPRESS: "15"        // Express
+    PN_EXPRESS: "18"        // Parcel (det PostNord bad dig testa!)
   };
 
   if (!mapping[shiponeId]) {
@@ -18,100 +18,127 @@ function mapServiceToProductCode(shiponeId) {
 }
 
 // =====================================================
-// GET OAUTH TOKEN (Customer API)
+// BUILD EDI PAYLOAD (THIS is the correct API)
 // =====================================================
-async function getAccessToken() {
-  const BASE_URL = process.env.POSTNORD_BASE_URL;
+function buildPayload(order, basicServiceCode) {
+  const now = new Date().toISOString();
 
-  const response = await axios.post(
-    `${BASE_URL}/oauth2/v2.0/token`,
-    new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: process.env.POSTNORD_CLIENT_ID,
-      client_secret: process.env.POSTNORD_CLIENT_SECRET,
-      scope: "shipment"
-    }),
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
+  return {
+    messageDate: now,
+    messageFunction: "Instruction",
+    messageId: `SHIPONE_${Date.now()}`,
+
+    application: {
+      applicationId: 9999,
+      name: "ShipOne",
+      version: "1.0"
+    },
+
+    updateIndicator: "Original",
+
+    shipment: [
+      {
+        shipmentIdentification: {
+          shipmentId: order.id.toString()
+        },
+
+        dateAndTimes: {
+          loadingDate: now
+        },
+
+        service: {
+          basicServiceCode: basicServiceCode
+        },
+
+        numberOfPackages: {
+          value: 1
+        },
+
+        totalGrossWeight: {
+          value: 1,
+          unit: "KGM"
+        },
+
+        parties: {
+          consignor: {
+            issuerCode: "Z12",
+            partyIdentification: {
+              partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
+              partyIdType: "160"
+            },
+            party: {
+              nameIdentification: {
+                name: "ShipOne"
+              },
+              address: {
+                streets: [process.env.SHIPPER_STREET],
+                postalCode: process.env.SHIPPER_ZIP,
+                city: process.env.SHIPPER_CITY,
+                countryCode: "SE"
+              }
+            }
+          },
+
+          consignee: {
+            party: {
+              nameIdentification: {
+                name: `${order.customer.first_name} ${order.customer.last_name}`
+              },
+              address: {
+                streets: [order.shipping_address.address1],
+                postalCode: order.shipping_address.zip.replace(/\s/g, ""),
+                city: order.shipping_address.city,
+                countryCode: order.shipping_address.country_code
+              },
+              contact: {
+                emailAddress: order.email || "test@test.se"
+              }
+            }
+          }
+        },
+
+        goodsItem: [
+          {
+            packageTypeCode: "PC",
+            items: [
+              {
+                itemIdentification: {
+                  itemId: order.id.toString(),
+                  itemIdType: "SSCC"
+                },
+                grossWeight: {
+                  value: 1,
+                  unit: "KGM"
+                }
+              }
+            ]
+          }
+        ]
       }
-    }
-  );
-
-  return response.data.access_token;
+    ]
+  };
 }
 
 // =====================================================
-// CREATE SHIPMENT (Customer API REST)
+// CREATE SHIPMENT (EDI v3)
 // =====================================================
 async function createShipment(order) {
-  if (!order.shipone_choice?.id) {
-    throw new Error("ShipOne choice missing on order");
-  }
-
   const BASE_URL = process.env.POSTNORD_BASE_URL;
-  const productCode = mapServiceToProductCode(order.shipone_choice.id);
 
-  console.log("📦 Using productCode:", productCode);
+  const basicServiceCode = mapServiceToBasicCode(order.shipone_choice.id);
 
-  const token = await getAccessToken();
+  console.log("📦 Using basicServiceCode:", basicServiceCode);
 
- const now = new Date().toISOString();
+  const payload = buildPayload(order, basicServiceCode);
 
-const payload = {
-  shipment: {
-    shipmentDate: now,
-
-    product: {
-      productCode: productCode
-    },
-
-    transportInstruction: "DELIVERY",
-
-    parties: {
-      consignor: {
-        partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
-        name: "ShipOne",
-        address: {
-          street1: process.env.SHIPPER_STREET,
-          postalCode: process.env.SHIPPER_ZIP,
-          city: process.env.SHIPPER_CITY,
-          countryCode: "SE"
-        }
-      },
-
-      consignee: {
-        name: `${order.customer.first_name} ${order.customer.last_name}`,
-        address: {
-          street1: order.shipping_address.address1,
-          postalCode: order.shipping_address.zip.replace(/\s/g, ""),
-          city: order.shipping_address.city,
-          countryCode: order.shipping_address.country_code
-        }
-      }
-    },
-
-    parcels: [
-      {
-        weight: {
-          value: 1,
-          unit: "kg"
-        }
-      }
-    ]
-  }
-};
-
-
-  console.log("📡 Sending REST shipment to PostNord...");
+  console.log("📡 Sending EDI v3 request to PostNord...");
   console.log(JSON.stringify(payload, null, 2));
 
   const response = await axios.post(
-    `${BASE_URL}/shipment/v1/shipments`,
+    `${BASE_URL}/rest/shipment/v3/edi`,
     payload,
     {
       headers: {
-        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "X-IBM-Client-Id": process.env.POSTNORD_CLIENT_ID,
         "X-IBM-Client-Secret": process.env.POSTNORD_CLIENT_SECRET
@@ -119,8 +146,8 @@ const payload = {
     }
   );
 
-  console.log("✅ Shipment created");
-  return response.data;
+  console.log("✅ PostNord accepted EDI shipment");
+  return { tracking_number: order.id.toString() };
 }
 
 module.exports = { createShipment };

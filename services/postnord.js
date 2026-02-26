@@ -56,45 +56,52 @@ async function createShipment(order) {
 
   const token = await getAccessToken();
 
-  const payload = {
-    shipment: {
-      product: {
-        productCode: productCode
-      },
+ const now = new Date().toISOString();
 
-      parties: {
-        consignor: {
-          partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
-          name: "ShipOne",
-          address: {
-            street1: process.env.SHIPPER_STREET,
-            postalCode: process.env.SHIPPER_ZIP,
-            city: process.env.SHIPPER_CITY,
-            countryCode: "SE"
-          }
-        },
+const payload = {
+  shipment: {
+    shipmentDate: now,
 
-        consignee: {
-          name: `${order.customer.first_name} ${order.customer.last_name}`,
-          address: {
-            street1: order.shipping_address.address1,
-            postalCode: order.shipping_address.zip,
-            city: order.shipping_address.city,
-            countryCode: order.shipping_address.country_code
-          }
+    product: {
+      productCode: productCode
+    },
+
+    transportInstruction: "DELIVERY",
+
+    parties: {
+      consignor: {
+        partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
+        name: "ShipOne",
+        address: {
+          street1: process.env.SHIPPER_STREET,
+          postalCode: process.env.SHIPPER_ZIP,
+          city: process.env.SHIPPER_CITY,
+          countryCode: "SE"
         }
       },
 
-      parcels: [
-        {
-          weight: {
-            value: 1,
-            unit: "kg"
-          }
+      consignee: {
+        name: `${order.customer.first_name} ${order.customer.last_name}`,
+        address: {
+          street1: order.shipping_address.address1,
+          postalCode: order.shipping_address.zip.replace(/\s/g, ""),
+          city: order.shipping_address.city,
+          countryCode: order.shipping_address.country_code
         }
-      ]
-    }
-  };
+      }
+    },
+
+    parcels: [
+      {
+        weight: {
+          value: 1,
+          unit: "kg"
+        }
+      }
+    ]
+  }
+};
+
 
   console.log("📡 Sending REST shipment to PostNord...");
   console.log(JSON.stringify(payload, null, 2));

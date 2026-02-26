@@ -129,22 +129,25 @@ async function createShipment(order) {
 
   console.log("📦 Using basicServiceCode:", basicServiceCode);
 
-  const payload = buildPayload(order, basicServiceCode);
+ const payload = buildPayload(order, basicServiceCode);
 
-  console.log("📡 Sending EDI v3 request to PostNord...");
-  console.log(JSON.stringify(payload, null, 2));
+// 🔒 Convert to CLEAN JSON STRING (prevents corruption)
+const jsonBody = JSON.stringify(payload);
 
-  const response = await axios.post(
-    `${BASE_URL}/rest/shipment/v3/edi`,
-    payload,
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "X-IBM-Client-Id": process.env.POSTNORD_CLIENT_ID,
-        "X-IBM-Client-Secret": process.env.POSTNORD_CLIENT_SECRET
-      }
-    }
-  );
+console.log("📡 Sending EDI v3 request to PostNord...");
+
+const response = await axios({
+  method: "post",
+  url: `${BASE_URL}/rest/shipment/v3/edi`,
+  data: jsonBody,
+  maxBodyLength: Infinity,
+  headers: {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(jsonBody),
+    "X-IBM-Client-Id": process.env.POSTNORD_CLIENT_ID,
+    "X-IBM-Client-Secret": process.env.POSTNORD_CLIENT_SECRET
+  }
+});
 
   console.log("✅ PostNord accepted EDI shipment");
   return { tracking_number: order.id.toString() };

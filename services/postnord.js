@@ -1,21 +1,6 @@
 const axios = require("axios");
 
 // =====================================================
-// ShipOne → PostNord EDI Service Mapping
-// =====================================================
-function mapServiceToBasicCode(shiponeId) {
-  const mapping = {
-    PN_SERVICE_POINT: "18", // MyPack Collect
-    PN_HOME: "19",          // MyPack Home
-    PN_EXPRESS: "18"        // Start with Collect (stable)
-  };
-
-  if (!mapping[shiponeId]) {
-    throw new Error("Unknown ShipOne service: " + shiponeId);
-  }
-
-  return mapping[shiponeId];
-}
 
 // =====================================================
 // Build EDI Payload (THIS is what PostNord expects)
@@ -94,25 +79,7 @@ function buildPayload(order, basicServiceCode) {
           }
         },
 
-        goodsItem: [
-          {
-            packageTypeCode: "PC",
-            items: [
-              {
-                itemIdentification: {
-                  itemId: order.id.toString(),
-                  itemIdType: "SSCC"
-                },
-                grossWeight: {
-                  value: 1,
-                  unit: "KGM"
-                }
-              }
-            ]
-          }
-        ]
-      }
-    ]
+       
   };
 }
 

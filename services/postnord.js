@@ -97,25 +97,12 @@ function buildPayload(order, basicServiceCode) {
           }
         },
 
-        goodsItem: [
-          {
-            packageTypeCode: "PC",
-            items: [
-              {
-                itemIdentification: {
-                  itemId: order.id.toString(),
-                  itemIdType: "SSCC"
-                },
-                grossWeight: {
-                  value: 1,
-                  unit: "KGM"
-                }
-              }
-            ]
-          }
-        ]
-      }
-    ]
+     goodsItem: [
+  {
+    packageTypeCode: "PC"
+  }
+]
+
   };
 }
 

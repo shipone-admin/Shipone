@@ -3,9 +3,9 @@
 // ================================
 // SHIPONE BACKEND
 // ================================
-import { createShipment } from "./postnordShipment.js";
 const express = require("express");
 const { chooseBestOption } = require("./services/routingEngine");
+const { createShipment } = require("./postnordShipment");
 
 const { collectRates } = require("./core/rateCollector");
 const shipmentStore = require("./services/shipmentStore");

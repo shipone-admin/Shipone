@@ -1,49 +1,27 @@
-// services/routingEngine.js
+// =====================================================
+// ShipOne Routing Engine (ESM VERSION)
+// =====================================================
 
-/**
- * ShipOne Intelligence Engine
- * Bestämmer vilken frakt som ska väljas
- */
-
-function chooseBestOption(options, choice = "SMART") {
+export function chooseBestOption(options, choice = "SMART") {
   if (!options || options.length === 0) {
     throw new Error("No shipping options provided");
   }
 
   console.log("🚚 ShipOne Choice:", choice);
 
-  // -------------------------
-  // CHEAPEST
-  // -------------------------
   if (choice === "CHEAP") {
-    return options.reduce((cheapest, current) =>
-      current.price < cheapest.price ? current : cheapest
-    );
+    return options.reduce((c, n) => (n.price < c.price ? n : c));
   }
 
-  // -------------------------
-  // FASTEST
-  // -------------------------
   if (choice === "FAST") {
-    return options.reduce((fastest, current) =>
-      current.eta_days < fastest.eta_days ? current : fastest
-    );
+    return options.reduce((c, n) => (n.eta_days < c.eta_days ? n : c));
   }
 
-  // -------------------------
-  // SMART (default)
-  // -------------------------
+  // SMART
   return options
-    .map(option => ({
-      ...option,
-      score:
-        option.price * 0.5 +
-        option.eta_days * 30 +
-        (option.co2 || 0) * 10
+    .map(o => ({
+      ...o,
+      score: o.price * 0.5 + o.eta_days * 30 + (o.co2 || 0) * 10
     }))
     .sort((a, b) => a.score - b.score)[0];
 }
-
-module.exports = {
-  chooseBestOption
-};

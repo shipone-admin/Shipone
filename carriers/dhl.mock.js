@@ -1,24 +1,19 @@
-module.exports = {
-  name: "DHL",
-  type: "mock",
+// =====================================================
+// DHL MOCK (ESM)
+// =====================================================
 
+export default {
   async getRates(order) {
     console.log("📦 DHL MOCK called");
 
     return [
       {
+        carrier: "dhl",
         id: "DHL_PARCEL",
         name: "DHL Parcel",
-        price: 69,
+        price: 95,
         eta_days: 2,
-        co2: 1.8
-      },
-      {
-        id: "DHL_EXPRESS",
-        name: "DHL Express",
-        price: 129,
-        eta_days: 1,
-        co2: 2.9
+        co2: 3.1
       }
     ];
   }

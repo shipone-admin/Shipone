@@ -1,23 +1,30 @@
 // =====================================================
-// ShipOne → PostNord Shipment V3 (API-KEY AUTH VERSION)
-// This version is for "Customer Plan / API Application"
-// NO OAuth. NO Bearer token. ONLY API KEY.
+// ShipOne → PostNord EDI V3 (CORRECT IMPLEMENTATION)
+// Endpoint: /rest/shipment/v3/edi
+// Auth: API KEY (Customer Plan)
 // =====================================================
 
 import axios from "axios";
 
-// =====================================================
-// Build clean PostNord V3 payload (MINIMUM REQUIRED)
-// IMPORTANT: No SSCC, no goods items, no advanced fields.
-// PostNord V3 accepts this minimal structure.
-// =====================================================
-function buildShipmentPayload(order) {
+// Hard-set service from Tobias example (Parcel = 18)
+// (du kan göra mapping senare)
+const SERVICE_CODE = "18";
+
+export async function createPostNordShipment(order) {
   const now = new Date().toISOString();
 
-  return {
+  const payload = {
     messageDate: now,
     messageFunction: "Instruction",
     messageId: `SHIPONE_${Date.now()}`,
+
+    // REQUIRED in EDI (du saknade denna tidigare)
+    application: {
+      applicationId: "1",
+      name: "ShipOne",
+      version: "1.0"
+    },
+
     updateIndicator: "Original",
 
     shipment: [
@@ -30,11 +37,9 @@ function buildShipmentPayload(order) {
           loadingDate: now
         },
 
-        // ⚠️ NO basicServiceCode (PostNord selects from agreement)
         service: {
-  basicServiceCode: order.shipone_choice.id
-},
-
+          basicServiceCode: SERVICE_CODE
+        },
 
         numberOfPackages: {
           value: 1
@@ -47,6 +52,14 @@ function buildShipmentPayload(order) {
 
         parties: {
           consignor: {
+            issuerCode: "Z12",
+
+            // THIS is your customer number
+            partyIdentification: {
+              partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
+              partyIdType: "160"
+            },
+
             party: {
               nameIdentification: {
                 name: "ShipOne"
@@ -70,54 +83,59 @@ function buildShipmentPayload(order) {
                 postalCode: order.shipping_address.zip.replace(/\s/g, ""),
                 city: order.shipping_address.city,
                 countryCode: order.shipping_address.country_code
+              },
+              contact: {
+                contactName: `${order.customer.first_name} ${order.customer.last_name}`,
+                emailAddress: order.email || "test@test.com",
+                smsNo: order.shipping_address.phone || "+46111111111"
               }
             }
           }
-        }
+        },
+
+        // REQUIRED for EDI (du tog bort detta felaktigt tidigare)
+        goodsItem: [
+          {
+            packageTypeCode: "PC",
+            items: [
+              {
+                itemIdentification: {
+                  itemId: String(order.id).padStart(18, "0"),
+                  itemIdType: "SSCC"
+                },
+                grossWeight: {
+                  value: 1,
+                  unit: "KGM"
+                }
+              }
+            ]
+          }
+        ]
       }
     ]
   };
-}
 
-// =====================================================
-// Create Shipment (V3 API KEY AUTH — NOT OAuth)
-// =====================================================
-export async function createPostNordShipment(order) {
   try {
-    const url = `${process.env.POSTNORD_BASE_URL}/rest/shipment/v3/shipments`;
+    const url = `${process.env.POSTNORD_BASE_URL}/rest/shipment/v3/edi`;
 
-    const payload = buildShipmentPayload(order);
-
-    console.log("📡 Sending PostNord V3 shipment...");
+    console.log("📡 Sending PostNord EDI request...");
     console.log(JSON.stringify(payload, null, 2));
 
     const response = await axios.post(url, payload, {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-
-        // ✅ THIS is the only authentication your plan uses
         apikey: process.env.POSTNORD_API_KEY
-      },
-      timeout: 15000
+      }
     });
 
-    console.log("✅ PostNord shipment created");
+    console.log("✅ POSTNORD OK");
 
-    return {
-      success: true,
-      data: response.data
-    };
+    return response.data;
 
   } catch (error) {
-    console.error("❌ SHIPMENT ERROR:");
-
-    if (error.response) {
-      console.error(error.response.data);
-      return { success: false, error: error.response.data };
-    }
-
-    console.error(error.message);
-    return { success: false, error: error.message };
+    console.error("❌ POSTNORD ERROR");
+    console.error(error.response?.data || error.message);
+    throw error;
   }
 }

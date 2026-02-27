@@ -1,21 +1,15 @@
 const axios = require("axios");
 
 async function createPostNordShipment(order) {
-  console.log("📡 Sending PostNord EDI request...");
-
   const now = new Date().toISOString();
 
-  // SSCC måste vara 18 siffror
-  const sscc = String(Date.now()).padStart(18, "0");
-
-  // POSTNORD EDI BODY — STATISK STRUKTUR (INGEN DYNAMIK SOM KAN GÅ SÖNDER)
-  const ediInstruction = {
+  const payload = {
     messageDate: now,
     messageFunction: "Instruction",
     messageId: "SHIPONE_" + Date.now(),
 
     application: {
-      applicationId: "1",
+      applicationId: 1,
       name: "ShipOne",
       version: "1.0"
     },
@@ -33,7 +27,7 @@ async function createPostNordShipment(order) {
         },
 
         service: {
-          basicServiceCode: "18" // MyPack Home (ändra senare om du vill)
+          basicServiceCode: "18"
         },
 
         numberOfPackages: {
@@ -52,16 +46,14 @@ async function createPostNordShipment(order) {
               partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
               partyIdType: "160"
             },
-
             party: {
               nameIdentification: {
                 name: "ShipOne"
               },
-
               address: {
-                streets: ["Hästhagsvägen 38"],
-                postalCode: "29175",
-                city: "Färlöv",
+                streets: [process.env.SHIPPER_STREET],
+                postalCode: process.env.SHIPPER_ZIP,
+                city: process.env.SHIPPER_CITY,
                 countryCode: "SE"
               }
             }
@@ -70,20 +62,16 @@ async function createPostNordShipment(order) {
           consignee: {
             party: {
               nameIdentification: {
-                name: order.shipping_name || "Customer"
+                name:
+                  order.shipping_address.first_name +
+                  " " +
+                  order.shipping_address.last_name
               },
-
               address: {
-                streets: [order.shipping_address1 || "Unknown"],
-                postalCode: order.shipping_zip || "00000",
-                city: order.shipping_city || "Unknown",
-                countryCode: order.shipping_country || "SE"
-              },
-
-              contact: {
-                contactName: order.shipping_name || "Customer",
-                emailAddress: order.email || "test@test.se",
-                smsNo: order.phone || "+46111111111"
+                streets: [order.shipping_address.address1],
+                postalCode: order.shipping_address.zip.replace(/\s/g, ""),
+                city: order.shipping_address.city,
+                countryCode: order.shipping_address.country_code
               }
             }
           }
@@ -92,14 +80,12 @@ async function createPostNordShipment(order) {
         goodsItem: [
           {
             packageTypeCode: "PC",
-
             items: [
               {
                 itemIdentification: {
-                  itemId: sscc,
+                  itemId: String(Date.now()).padStart(18, "0"),
                   itemIdType: "SSCC"
                 },
-
                 grossWeight: {
                   value: 1,
                   unit: "KGM"
@@ -112,34 +98,23 @@ async function createPostNordShipment(order) {
     ]
   };
 
-  console.log("📦 CLEAN EDI STRUCTURE:");
-  console.log(JSON.stringify(ediInstruction, null, 2));
+  console.log("📡 Sending PostNord V3 EDI...");
+  console.log(JSON.stringify(payload, null, 2));
 
-  try {
-    const response = await axios.post(
-      process.env.POSTNORD_EDI_URL,
-      ediInstruction,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization:
-            "Basic " +
-            Buffer.from(
-              process.env.POSTNORD_API_KEY + ":" + process.env.POSTNORD_API_SECRET
-            ).toString("base64")
-        }
+  const response = await axios.post(
+    process.env.POSTNORD_BASE_URL + "/rest/shipment/v3/edi",
+    payload,
+    {
+      headers: {
+        "Content-Type": "application/json",
+        "X-IBM-Client-Id": process.env.POSTNORD_CLIENT_ID,
+        "X-IBM-Client-Secret": process.env.POSTNORD_CLIENT_SECRET
       }
-    );
+    }
+  );
 
-    console.log("✅ POSTNORD SUCCESS");
-    console.log(response.data);
-
-    return response.data;
-  } catch (error) {
-    console.error("❌ POSTNORD ERROR");
-    console.error(error.response?.data || error.message);
-    throw error;
-  }
+  console.log("✅ PostNord response OK");
+  return response.data;
 }
 
 module.exports = { createPostNordShipment };

@@ -1,38 +1,28 @@
-// carriers/postnord.mock.js
+// =====================================================
+// POSTNORD MOCK (ESM)
+// =====================================================
 
-// Mock version of PostNord rates (used until API is live)
+export default {
+  async getRates(order) {
+    console.log("📡 PostNord mock rates requested");
 
-async function getRates(order) {
-  console.log("📡 PostNord mock rates requested");
-
-  return [
-    {
-      carrier: "postnord",
-      id: "PN_SERVICE_POINT",
-      name: "Service Point",
-      price: 59,
-      eta_days: 2,
-      co2: 1.2
-    },
-    {
-      carrier: "postnord",
-      id: "PN_HOME",
-      name: "Home Delivery",
-      price: 79,
-      eta_days: 2,
-      co2: 1.6
-    },
-    {
-      carrier: "postnord",
-      id: "PN_EXPRESS",
-      name: "Express",
-      price: 109,
-      eta_days: 1,
-      co2: 2.4
-    }
-  ];
-}
-
-module.exports = {
-  getRates
+    return [
+      {
+        carrier: "postnord",
+        id: "PN_EXPRESS",
+        name: "Express",
+        price: 109,
+        eta_days: 1,
+        co2: 2.4
+      },
+      {
+        carrier: "postnord",
+        id: "PN_STANDARD",
+        name: "MyPack Collect",
+        price: 79,
+        eta_days: 2,
+        co2: 1.8
+      }
+    ];
+  }
 };

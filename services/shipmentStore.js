@@ -1,29 +1,38 @@
-const fs = require("fs");
-const path = require("path");
+// =====================================================
+// Shipment Store (ESM VERSION)
+// =====================================================
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const FILE = path.join(__dirname, "../data/shipments.json");
 
-// Ensure file exists
 if (!fs.existsSync(FILE)) {
   fs.writeFileSync(FILE, JSON.stringify([]));
 }
 
-// Read all shipments
 function getAll() {
-  const raw = fs.readFileSync(FILE);
-  return JSON.parse(raw);
+  return JSON.parse(fs.readFileSync(FILE));
 }
 
-// Save new shipment
 async function save(shipment) {
   const data = getAll();
   data.push(shipment);
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
-// Stats (this becomes powerful later)
 function stats() {
   const data = getAll();
+
+  const groupBy = (arr, key) =>
+    arr.reduce((acc, item) => {
+      acc[item[key]] = (acc[item[key]] || 0) + 1;
+      return acc;
+    }, {});
 
   return {
     total_orders: data.length,
@@ -32,11 +41,4 @@ function stats() {
   };
 }
 
-function groupBy(arr, key) {
-  return arr.reduce((acc, item) => {
-    acc[item[key]] = (acc[item[key]] || 0) + 1;
-    return acc;
-  }, {});
-}
-
-module.exports = { save, getAll, stats };
+export default { save, getAll, stats };

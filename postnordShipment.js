@@ -79,12 +79,15 @@ async function createShipment(order) {
 
   console.log("📡 Sending shipment to PostNord...");
 
-  const res = await axios.post(`${BASE_URL}/rest/shipment/v1/shipments`, payload, {
-  headers: {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-    "x-api-key": process.env.POSTNORD_API_KEY
-  }
+  await axios.post(`${BASE_URL}/rest/shipment/v3/shipments`, payload, {
+
+ headers: {
+  Authorization: `Bearer ${token}`,
+  "Content-Type": "application/json",
+  Accept: "application/json",
+  "x-api-key": process.env.POSTNORD_API_KEY
+}
+
 });
 
 

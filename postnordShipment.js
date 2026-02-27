@@ -31,7 +31,10 @@ function buildShipmentPayload(order) {
         },
 
         // ⚠️ NO basicServiceCode (PostNord selects from agreement)
-        service: {},
+        service: {
+  basicServiceCode: order.shipone_choice.id
+},
+
 
         numberOfPackages: {
           value: 1

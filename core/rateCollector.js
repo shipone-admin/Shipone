@@ -1,26 +1,19 @@
-// core/rateCollector.js
+// =====================================================
+// Collect rates from mock carriers (ESM)
+// =====================================================
 
-const postnord = require("../carriers/postnord.mock");
-const dhl = require("../carriers/dhl.mock");
-const budbee = require("../carriers/budbee.mock");
+import postnord from "../carriers/postnord.mock.js";
+import dhl from "../carriers/dhl.mock.js";
+import budbee from "../carriers/budbee.mock.js";
 
-// Hämta alla fraktalternativ från alla carriers
-async function collectRates(order) {
-  let rates = [];
-
+export async function collectRates(order) {
   const postnordRates = await postnord.getRates(order);
   const dhlRates = await dhl.getRates(order);
   const budbeeRates = await budbee.getRates(order);
 
-  rates = [
+  return [
     ...postnordRates,
     ...dhlRates,
     ...budbeeRates
   ];
-
-  return rates;
 }
-
-module.exports = {
-  collectRates
-};

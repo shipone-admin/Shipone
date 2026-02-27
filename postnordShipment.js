@@ -85,8 +85,9 @@ async function createShipment(order) {
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",
   Accept: "application/json",
-  "x-api-key": process.env.POSTNORD_API_KEY
+  apikey: process.env.POSTNORD_API_KEY
 }
+
 
 });
 

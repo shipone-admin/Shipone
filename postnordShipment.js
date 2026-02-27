@@ -1,103 +1,120 @@
-const axios = require("axios");
+// =====================================================
+// ShipOne → PostNord Shipment V3 (API-KEY AUTH VERSION)
+// This version is for "Customer Plan / API Application"
+// NO OAuth. NO Bearer token. ONLY API KEY.
+// =====================================================
 
-const BASE_URL = process.env.POSTNORD_BASE_URL;
-const CLIENT_ID = process.env.POSTNORD_CLIENT_ID;
-const CLIENT_SECRET = process.env.POSTNORD_CLIENT_SECRET;
-const CUSTOMER_NUMBER = process.env.POSTNORD_CUSTOMER_NUMBER;
+import axios from "axios";
 
-let cachedToken = null;
-let tokenExpires = 0;
+// =====================================================
+// Build clean PostNord V3 payload (MINIMUM REQUIRED)
+// IMPORTANT: No SSCC, no goods items, no advanced fields.
+// PostNord V3 accepts this minimal structure.
+// =====================================================
+function buildShipmentPayload(order) {
+  const now = new Date().toISOString();
 
-// ============================
-// AUTH
-// ============================
-async function getAccessToken() {
-  if (cachedToken && Date.now() < tokenExpires) {
-    return cachedToken;
-  }
+  return {
+    messageDate: now,
+    messageFunction: "Instruction",
+    messageId: `SHIPONE_${Date.now()}`,
+    updateIndicator: "Original",
 
-  const res = await axios.post(
-    `${BASE_URL}/oauth2/v2/token`,
-    "grant_type=client_credentials",
-    {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      auth: {
-        username: CLIENT_ID,
-        password: CLIENT_SECRET
-      }
-    }
-  );
-
-  cachedToken = res.data.access_token;
-  tokenExpires = Date.now() + (res.data.expires_in - 60) * 1000;
-
-  return cachedToken;
-}
-
-// ============================
-// CREATE SHIPMENT
-// ============================
-async function createShipment(order) {
-  const token = await getAccessToken();
-  const addr = order.shipping_address;
-
-  const payload = {
-    shipments: [
+    shipment: [
       {
-        product: { productCode: "19" },
+        shipmentIdentification: {
+          shipmentId: String(order.id)
+        },
+
+        dateAndTimes: {
+          loadingDate: now
+        },
+
+        // ⚠️ NO basicServiceCode (PostNord selects from agreement)
+        service: {},
+
+        numberOfPackages: {
+          value: 1
+        },
+
+        totalGrossWeight: {
+          value: 1,
+          unit: "KGM"
+        },
+
         parties: {
-          shipper: {
-            name: "ShipOne",
-            customerNumber: CUSTOMER_NUMBER,
-            address: {
-              street1: process.env.SHIPPER_STREET,
-              postalCode: process.env.SHIPPER_ZIP,
-              city: process.env.SHIPPER_CITY,
-              countryCode: "SE"
+          consignor: {
+            party: {
+              nameIdentification: {
+                name: "ShipOne"
+              },
+              address: {
+                streets: [process.env.SHIPPER_STREET],
+                postalCode: process.env.SHIPPER_ZIP,
+                city: process.env.SHIPPER_CITY,
+                countryCode: "SE"
+              }
             }
           },
-          receiver: {
-            name: `${addr.first_name} ${addr.last_name}`,
-            address: {
-              street1: addr.address1,
-              postalCode: addr.zip,
-              city: addr.city,
-              countryCode: addr.country_code || "SE"
+
+          consignee: {
+            party: {
+              nameIdentification: {
+                name: `${order.customer.first_name} ${order.customer.last_name}`
+              },
+              address: {
+                streets: [order.shipping_address.address1],
+                postalCode: order.shipping_address.zip.replace(/\s/g, ""),
+                city: order.shipping_address.city,
+                countryCode: order.shipping_address.country_code
+              }
             }
           }
-        },
-        parcels: [
-          {
-            weight: { value: 1, unit: "kg" }
-          }
-        ]
+        }
       }
     ]
   };
-
-  console.log("📡 Sending shipment to PostNord...");
-
-  await axios.post(`${BASE_URL}/rest/shipment/v3/shipments`, payload, {
-
- headers: {
-  Authorization: `Bearer ${token}`,
-  "Content-Type": "application/json",
-  Accept: "application/json",
-  apikey: process.env.POSTNORD_API_KEY
 }
 
+// =====================================================
+// Create Shipment (V3 API KEY AUTH — NOT OAuth)
+// =====================================================
+export async function createPostNordShipment(order) {
+  try {
+    const url = `${process.env.POSTNORD_BASE_URL}/rest/shipment/v3/shipments`;
 
-});
+    const payload = buildShipmentPayload(order);
 
+    console.log("📡 Sending PostNord V3 shipment...");
+    console.log(JSON.stringify(payload, null, 2));
 
-  console.log("✅ PostNord OK");
+    const response = await axios.post(url, payload, {
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
 
-  return {
-    tracking_number:
-      res.data.shipments?.[0]?.trackingNumbers?.[0] || "pending"
-  };
+        // ✅ THIS is the only authentication your plan uses
+        apikey: process.env.POSTNORD_API_KEY
+      },
+      timeout: 15000
+    });
+
+    console.log("✅ PostNord shipment created");
+
+    return {
+      success: true,
+      data: response.data
+    };
+
+  } catch (error) {
+    console.error("❌ SHIPMENT ERROR:");
+
+    if (error.response) {
+      console.error(error.response.data);
+      return { success: false, error: error.response.data };
+    }
+
+    console.error(error.message);
+    return { success: false, error: error.message };
+  }
 }
-
-module.exports = { createShipment };

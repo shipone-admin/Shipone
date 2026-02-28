@@ -1,6 +1,5 @@
 // ShipOne → PostNord Shipment V3 (EDI)
 
-const fetch = require("node-fetch");
 
 async function createPostNordShipment(order) {
   console.log("📡 Creating REAL PostNord shipment…");

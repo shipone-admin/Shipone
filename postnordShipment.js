@@ -1,3 +1,6 @@
+console.log("ENV CHECK START");
+console.log("POSTNORD_EDI_URL =", process.env.POSTNORD_EDI_URL);
+console.log("ENV CHECK END");
 const fetch = require("node-fetch");
 console.log("POSTNORD_EDI_URL =", process.env.POSTNORD_EDI_URL);
 

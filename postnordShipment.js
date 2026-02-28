@@ -107,24 +107,27 @@ async function createPostNordShipment(order) {
           }
         },
 
-        goodsItem: [
-          {
-            packageTypeCode: "PC",
-            items: [
-              {
-                itemIdentification: {
-  itemId: generateSSCC(),
-  itemIdType: "SSCC"
-},
+       // Generate a valid SSCC for each shipment
+const sscc = generateSSCC();
 
-                grossWeight: {
-                  value: 1,
-                  unit: "KGM"
-                }
-              }
-            ]
-          }
-        ]
+goodsItem: [
+  {
+    packageTypeCode: "PC",
+    items: [
+      {
+        itemIdentification: {
+          itemId: sscc,
+          itemIdType: "SSCC"
+        },
+        grossWeight: {
+          value: 1,
+          unit: "KGM"
+        }
+      }
+    ]
+  }
+]
+
       }
     ]
   };

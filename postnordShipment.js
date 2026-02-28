@@ -1,4 +1,5 @@
 const fetch = require("node-fetch");
+console.log("POSTNORD_EDI_URL =", process.env.POSTNORD_EDI_URL);
 
 async function createPostNordShipment(order) {
   console.log("📡 Sending PostNord EDI request...");

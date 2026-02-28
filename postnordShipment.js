@@ -1,25 +1,44 @@
+// ================================
+// POSTNORD SHIPMENT V3 (COMMONJS)
+// ================================
+
+const fetch = require("node-fetch");
+
+
+// -------------------------------
+// SSCC GENERATOR (VALID GS1)
+// -------------------------------
 function generateSSCC() {
-  const extensionDigit = "3"; // arbitrary (0-9)
-  const companyPrefix = "735999999"; // temporary test prefix (PostNord allows for testing)
+  const extensionDigit = "3"; // allowed 0–9
+  const companyPrefix = "735999999"; // test prefix (replace later with your GS1)
   const serial = String(Date.now()).slice(-7);
 
   const base = extensionDigit + companyPrefix + serial;
 
   let sum = 0;
-  let odd = true;
+  let multiplyByThree = true;
 
   for (let i = base.length - 1; i >= 0; i--) {
-    const num = parseInt(base[i], 10);
-    sum += odd ? num * 3 : num;
-    odd = !odd;
+    const digit = parseInt(base[i], 10);
+    sum += multiplyByThree ? digit * 3 : digit;
+    multiplyByThree = !multiplyByThree;
   }
 
   const checkDigit = (10 - (sum % 10)) % 10;
 
   return base + checkDigit;
 }
+
+
+
+// -------------------------------
+// CREATE SHIPMENT
+// -------------------------------
 async function createPostNordShipment(order) {
   console.log("📦 Creating REAL PostNord shipment…");
+
+  // Generate SSCC BEFORE payload (this was your crash)
+  const sscc = generateSSCC();
 
   const consigneeName = String(order.shipping_address.name || "");
   const consigneeStreet = String(order.shipping_address.address1 || "");
@@ -67,12 +86,10 @@ async function createPostNordShipment(order) {
         parties: {
           consignor: {
             issuerCode: "Z12",
-
             partyIdentification: {
               partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
               partyIdType: "160"
             },
-
             party: {
               nameIdentification: {
                 name: "ShipOne"
@@ -91,14 +108,12 @@ async function createPostNordShipment(order) {
               nameIdentification: {
                 name: consigneeName
               },
-
               address: {
                 streets: [consigneeStreet],
                 postalCode: consigneeZip,
                 city: consigneeCity,
                 countryCode: consigneeCountry
               },
-
               contact: {
                 contactName: consigneeName,
                 emailAddress: consigneeEmail
@@ -107,33 +122,33 @@ async function createPostNordShipment(order) {
           }
         },
 
-       // Generate a valid SSCC for each shipment
-const sscc = generateSSCC();
-
-goodsItem: [
-  {
-    packageTypeCode: "PC",
-    items: [
-      {
-        itemIdentification: {
-          itemId: sscc,
-          itemIdType: "SSCC"
-        },
-        grossWeight: {
-          value: 1,
-          unit: "KGM"
-        }
-      }
-    ]
-  }
-]
-
+        goodsItem: [
+          {
+            packageTypeCode: "PC",
+            items: [
+              {
+                itemIdentification: {
+                  itemId: sscc,   // ✅ VALID SSCC NOW
+                  itemIdType: "SSCC"
+                },
+                grossWeight: {
+                  value: 1,
+                  unit: "KGM"
+                }
+              }
+            ]
+          }
+        ]
       }
     ]
   };
 
   console.log("📦 Sending payload to PostNord…");
   console.log(JSON.stringify(payload, null, 2));
+
+  if (!process.env.POSTNORD_API_URL) {
+    throw new Error("POSTNORD_API_URL missing");
+  }
 
   const response = await fetch(process.env.POSTNORD_API_URL, {
     method: "POST",

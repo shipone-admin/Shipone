@@ -107,9 +107,13 @@ async function createPostNordShipment(order) {
 
   const response = await fetch(POSTNORD_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-IBM-Client-Id": CLIENT_ID
+   headers: {
+  "Content-Type": "application/json",
+  "Accept": "application/json",
+  "X-IBM-Client-Id": process.env.POSTNORD_CLIENT_ID,
+  "X-IBM-Client-Secret": process.env.POSTNORD_CLIENT_SECRET
+}
+
     },
     body: JSON.stringify(payload)
   });

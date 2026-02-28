@@ -1,35 +1,16 @@
-// ===============================
-// POSTNORD EDI v3 INTEGRATION
-// CommonJS version (Railway-safe)
-// ===============================
+// ShipOne → PostNord Shipment V3 (EDI)
 
 const fetch = require("node-fetch");
 
-// ====== LOAD ENV VARIABLES ======
-const POSTNORD_URL = process.env.POSTNORD_EDI_URL;
-const CLIENT_ID = process.env.POSTNORD_API_KEY;
-const CUSTOMER_NUMBER = process.env.POSTNORD_CUSTOMER_NUMBER;
-
-// ====== HARD FAIL IF ENV IS MISSING ======
-if (!POSTNORD_URL) {
-  throw new Error("❌ POSTNORD_EDI_URL is missing in Railway variables");
-}
-
-if (!CLIENT_ID) {
-  throw new Error("❌ POSTNORD_API_KEY is missing in Railway variables");
-}
-
-if (!CUSTOMER_NUMBER) {
-  throw new Error("❌ POSTNORD_CUSTOMER_NUMBER is missing in Railway variables");
-}
-
-console.log("✅ PostNord config loaded");
-console.log("URL:", POSTNORD_URL);
-
-// =========================================
-
 async function createPostNordShipment(order) {
   console.log("📡 Creating REAL PostNord shipment…");
+
+  const url = process.env.POSTNORD_API_URL; 
+  // ska vara: https://api2.postnord.com/rest/shipment/v3/edi
+
+  if (!url) {
+    throw new Error("POSTNORD_API_URL missing in environment variables");
+  }
 
   const payload = {
     messageDate: new Date().toISOString(),
@@ -55,12 +36,10 @@ async function createPostNordShipment(order) {
         },
 
         service: {
-          basicServiceCode: "18" // MyPack / Express test
+          basicServiceCode: "18" // Parcel
         },
 
-        numberOfPackages: {
-          value: 1
-        },
+        numberOfPackages: { value: 1 },
 
         totalGrossWeight: {
           value: 1,
@@ -69,9 +48,19 @@ async function createPostNordShipment(order) {
 
         parties: {
           consignor: {
+            issuerCode: "Z12",
             partyIdentification: {
-              partyId: CUSTOMER_NUMBER,
+              partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
               partyIdType: "160"
+            },
+            party: {
+              nameIdentification: { name: "ShipOne" },
+              address: {
+                streets: ["Hästhagsvägen 38"],
+                postalCode: "29175",
+                city: "Färlöv",
+                countryCode: "SE"
+              }
             }
           },
 
@@ -82,9 +71,14 @@ async function createPostNordShipment(order) {
               },
               address: {
                 streets: [order.shipping_address.address1],
-                postalCode: order.shipping_address.zip,
+                postalCode: order.shipping_address.zip.replace(" ", ""),
                 city: order.shipping_address.city,
                 countryCode: order.shipping_address.country_code
+              },
+              contact: {
+                contactName: order.shipping_address.name,
+                emailAddress: order.email || "test@test.se",
+                smsNo: order.phone || "+46700000000"
               }
             }
           }
@@ -93,10 +87,18 @@ async function createPostNordShipment(order) {
         goodsItem: [
           {
             packageTypeCode: "PC",
-            grossWeight: {
-              value: 1,
-              unit: "KGM"
-            }
+            items: [
+              {
+                itemIdentification: {
+                  itemId: String(order.id),
+                  itemIdType: "SSCC"
+                },
+                grossWeight: {
+                  value: 1,
+                  unit: "KGM"
+                }
+              }
+            ]
           }
         ]
       }
@@ -105,15 +107,11 @@ async function createPostNordShipment(order) {
 
   console.log("📦 Sending payload to PostNord…");
 
-  const response = await fetch(POSTNORD_URL, {
+  const response = await fetch(url, {
     method: "POST",
-   headers: {
-  "Content-Type": "application/json",
-  "Accept": "application/json",
-  "X-IBM-Client-Id": process.env.POSTNORD_CLIENT_ID,
-  "X-IBM-Client-Secret": process.env.POSTNORD_CLIENT_SECRET
-}
-
+    headers: {
+      "Content-Type": "application/json",
+      "X-IBM-Client-Id": process.env.POSTNORD_API_KEY
     },
     body: JSON.stringify(payload)
   });

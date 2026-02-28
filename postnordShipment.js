@@ -1,13 +1,37 @@
-console.log("ENV CHECK START");
-console.log("POSTNORD_EDI_URL =", process.env.POSTNORD_EDI_URL);
-console.log("ENV CHECK END");
+// ===============================
+// POSTNORD EDI v3 INTEGRATION
+// CommonJS version (Railway-safe)
+// ===============================
+
 const fetch = require("node-fetch");
-console.log("POSTNORD_EDI_URL =", process.env.POSTNORD_EDI_URL);
+
+// ====== LOAD ENV VARIABLES ======
+const POSTNORD_URL = process.env.POSTNORD_EDI_URL;
+const CLIENT_ID = process.env.POSTNORD_API_KEY;
+const CUSTOMER_NUMBER = process.env.POSTNORD_CUSTOMER_NUMBER;
+
+// ====== HARD FAIL IF ENV IS MISSING ======
+if (!POSTNORD_URL) {
+  throw new Error("❌ POSTNORD_EDI_URL is missing in Railway variables");
+}
+
+if (!CLIENT_ID) {
+  throw new Error("❌ POSTNORD_API_KEY is missing in Railway variables");
+}
+
+if (!CUSTOMER_NUMBER) {
+  throw new Error("❌ POSTNORD_CUSTOMER_NUMBER is missing in Railway variables");
+}
+
+console.log("✅ PostNord config loaded");
+console.log("URL:", POSTNORD_URL);
+
+// =========================================
 
 async function createPostNordShipment(order) {
-  console.log("📡 Sending PostNord EDI request...");
+  console.log("📡 Creating REAL PostNord shipment…");
 
-  const body = {
+  const payload = {
     messageDate: new Date().toISOString(),
     messageFunction: "Instruction",
     messageId: "SHIPONE_" + Date.now(),
@@ -31,7 +55,7 @@ async function createPostNordShipment(order) {
         },
 
         service: {
-          basicServiceCode: "18"
+          basicServiceCode: "18" // MyPack / Express test
         },
 
         numberOfPackages: {
@@ -46,7 +70,7 @@ async function createPostNordShipment(order) {
         parties: {
           consignor: {
             partyIdentification: {
-              partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
+              partyId: CUSTOMER_NUMBER,
               partyIdType: "160"
             }
           },
@@ -79,23 +103,25 @@ async function createPostNordShipment(order) {
     ]
   };
 
-  console.log(JSON.stringify(body, null, 2));
+  console.log("📦 Sending payload to PostNord…");
 
-  const response = await fetch(process.env.POSTNORD_EDI_URL, {
+  const response = await fetch(POSTNORD_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-IBM-Client-Id": process.env.POSTNORD_API_KEY
+      "X-IBM-Client-Id": CLIENT_ID
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(payload)
   });
 
   const text = await response.text();
 
   console.log("PostNord status:", response.status);
-  console.log("PostNord body:", text);
+  console.log("PostNord response:", text);
 
-  if (!response.ok) throw new Error(text);
+  if (!response.ok) {
+    throw new Error("PostNord API Error: " + text);
+  }
 
   return JSON.parse(text);
 }

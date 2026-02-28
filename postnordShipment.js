@@ -128,8 +128,10 @@ async function createPostNordShipment(order) {
             items: [
               {
                 itemIdentification: {
-                  itemId: sscc,   // ✅ VALID SSCC NOW
-                  itemIdType: "SSCC"
+  itemId: String(order.id),
+  itemIdType: "SRN"
+}
+
                 },
                 grossWeight: {
                   value: 1,

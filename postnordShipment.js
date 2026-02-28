@@ -1,7 +1,12 @@
-// Node 18+ har fetch inbyggt — importera inget!
-
 async function createPostNordShipment(order) {
-  console.log("📦 Sending payload to PostNord…");
+  console.log("📦 Creating REAL PostNord shipment…");
+
+  const consigneeName = String(order.shipping_address.name || "");
+  const consigneeStreet = String(order.shipping_address.address1 || "");
+  const consigneeZip = String(order.shipping_address.zip || "");
+  const consigneeCity = String(order.shipping_address.city || "");
+  const consigneeCountry = String(order.shipping_address.country_code || "SE");
+  const consigneeEmail = String(order.email || "test@test.se");
 
   const payload = {
     messageDate: new Date().toISOString(),
@@ -9,7 +14,7 @@ async function createPostNordShipment(order) {
     messageId: "SHIPONE_" + Date.now(),
 
     application: {
-      applicationId: "1",
+      applicationId: 1,
       name: "ShipOne",
       version: "1.0"
     },
@@ -41,14 +46,14 @@ async function createPostNordShipment(order) {
 
         parties: {
           consignor: {
-            issuerCode: "Z12",   // KRAV I V3
+            issuerCode: "Z12",
 
             partyIdentification: {
               partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
               partyIdType: "160"
             },
 
-            party: {             // KRAV I V3
+            party: {
               nameIdentification: {
                 name: "ShipOne"
               },
@@ -64,17 +69,19 @@ async function createPostNordShipment(order) {
           consignee: {
             party: {
               nameIdentification: {
-                name: order.shipping_address.name
+                name: consigneeName
               },
+
               address: {
-                streets: [order.shipping_address.address1],
-                postalCode: order.shipping_address.zip,
-                city: order.shipping_address.city,
-                countryCode: order.shipping_address.country_code
+                streets: [consigneeStreet],
+                postalCode: consigneeZip,
+                city: consigneeCity,
+                countryCode: consigneeCountry
               },
-              contact: {    // behövs ofta trots att docs säger optional
-                contactName: order.shipping_address.name,
-                emailAddress: order.email || "test@test.se"
+
+              contact: {
+                contactName: consigneeName,
+                emailAddress: consigneeEmail
               }
             }
           }
@@ -101,7 +108,7 @@ async function createPostNordShipment(order) {
     ]
   };
 
-  console.log("➡️ POSTNORD URL:", process.env.POSTNORD_API_URL);
+  console.log("📦 Sending payload to PostNord…");
   console.log(JSON.stringify(payload, null, 2));
 
   const response = await fetch(process.env.POSTNORD_API_URL, {

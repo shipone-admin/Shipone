@@ -1,5 +1,6 @@
 // ================================
 // POSTNORD SHIPMENT V3 (COMMONJS)
+// CLEAN VERSION — NO SYNTAX BUGS
 // ================================
 
 const fetch = require("node-fetch");
@@ -9,8 +10,8 @@ const fetch = require("node-fetch");
 // SSCC GENERATOR (VALID GS1)
 // -------------------------------
 function generateSSCC() {
-  const extensionDigit = "3"; // allowed 0–9
-  const companyPrefix = "735999999"; // test prefix (replace later with your GS1)
+  const extensionDigit = "3";
+  const companyPrefix = "735999999"; // test prefix
   const serial = String(Date.now()).slice(-7);
 
   const base = extensionDigit + companyPrefix + serial;
@@ -37,14 +38,13 @@ function generateSSCC() {
 async function createPostNordShipment(order) {
   console.log("📦 Creating REAL PostNord shipment…");
 
-  // Generate SSCC BEFORE payload (this was your crash)
   const sscc = generateSSCC();
 
-  const consigneeName = String(order.shipping_address.name || "");
-  const consigneeStreet = String(order.shipping_address.address1 || "");
-  const consigneeZip = String(order.shipping_address.zip || "");
-  const consigneeCity = String(order.shipping_address.city || "");
-  const consigneeCountry = String(order.shipping_address.country_code || "SE");
+  const consigneeName = String(order.shipping_address?.name || "Test Person");
+  const consigneeStreet = String(order.shipping_address?.address1 || "Testgatan 1");
+  const consigneeZip = String(order.shipping_address?.zip || "11122");
+  const consigneeCity = String(order.shipping_address?.city || "Stockholm");
+  const consigneeCountry = String(order.shipping_address?.country_code || "SE");
   const consigneeEmail = String(order.email || "test@test.se");
 
   const payload = {
@@ -91,9 +91,7 @@ async function createPostNordShipment(order) {
               partyIdType: "160"
             },
             party: {
-              nameIdentification: {
-                name: "ShipOne"
-              },
+              nameIdentification: { name: "ShipOne" },
               address: {
                 streets: ["Terminalvägen 24"],
                 postalCode: "17173",
@@ -105,9 +103,7 @@ async function createPostNordShipment(order) {
 
           consignee: {
             party: {
-              nameIdentification: {
-                name: consigneeName
-              },
+              nameIdentification: { name: consigneeName },
               address: {
                 streets: [consigneeStreet],
                 postalCode: consigneeZip,
@@ -125,34 +121,34 @@ async function createPostNordShipment(order) {
         goodsItem: [
           {
             packageTypeCode: "PC",
+
             items: [
               {
                 itemIdentification: {
-  itemId: String(order.id),
-  itemIdType: "SRN"
-}
-
+                  itemId: String(order.id),
+                  itemIdType: "SRN"
                 },
+
                 grossWeight: {
                   value: 1,
                   unit: "KGM"
                 }
               }
-            
-      
-        
-      
-    }]
+            ]
+          }
+        ]
+      }
+    ]
   };
 
   console.log("📦 Sending payload to PostNord…");
   console.log(JSON.stringify(payload, null, 2));
 
-  if (!process.env.POSTNORD_API_URL) {
-    throw new Error("POSTNORD_API_URL missing");
+  if (!process.env.POSTNORD_EDI_URL) {
+    throw new Error("POSTNORD_EDI_URL missing");
   }
 
-  const response = await fetch(process.env.POSTNORD_API_URL, {
+  const response = await fetch(process.env.POSTNORD_EDI_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -118,27 +118,24 @@ async function createPostNordShipment(order) {
           }
         },
 
-        goodsItem: [
-          {
-            packageTypeCode: "PC",
-
-            items: [
-              {
-                itemIdentification: {
-                  itemId: String(order.id),
-                  itemIdType: "SRN"
-                },
-
-                grossWeight: {
-                  value: 1,
-                  unit: "KGM"
-                }
-              }
-            ]
-          }
-        ]
+       goodsItem: [
+  {
+    packageTypeCode: "PC",
+    items: [
+      {
+        itemIdentification: {
+          itemId: sscc,          // ← DIN generateSSCC()
+          itemIdType: "SSCC"     // ← MÅSTE vara SSCC
+        },
+        grossWeight: {
+          value: 1,
+          unit: "KGM"
+        }
       }
     ]
+  }
+]
+
   };
 
   console.log("📦 Sending payload to PostNord…");

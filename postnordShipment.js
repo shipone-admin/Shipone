@@ -1,37 +1,33 @@
-// ============================================
-// POSTNORD SHIPMENT V3 — CLEAN WORKING VERSION
-// NO PATCHES — FULL REPLACEMENT
-// ============================================
+// ========================================
+// POSTNORD SHIPMENT V3 — CLEAN FULL FILE
+// ========================================
 
 const fetch = require("node-fetch");
 
 
-// ------------------------------------------------
-// SIMPLE SSCC GENERATOR (ALWAYS 18 DIGITS)
-// ------------------------------------------------
-// ------------------------------------------------
-// POSTNORD-ALIGNED SSCC GENERATOR (BASED ON CUSTOMER NUMBER)
-// ------------------------------------------------
+// ----------------------------------------
+// SSCC GENERATOR (POSTNORD COMPATIBLE)
+// ----------------------------------------
 function generateSSCC() {
 
-  const extensionDigit = "3";
-
-  // use YOUR PostNord customer number
   const customer = process.env.POSTNORD_CUSTOMER_NUMBER;
 
   if (!customer) {
     throw new Error("POSTNORD_CUSTOMER_NUMBER missing");
   }
 
-  // pad customer number to 9 digits (PostNord expects fixed length block)
-  const customerBlock = customer.toString().padStart(9, "0");
+  // Extension digit (always 3 for shipments)
+  const extensionDigit = "3";
 
-  // create 7 digit serial (unique per shipment)
+  // PostNord expects your customer number inside the SSCC
+  const customerBlock = String(customer).padStart(9, "0");
+
+  // Unique running number (7 digits)
   const serial = String(Date.now()).slice(-7);
 
   const base17 = extensionDigit + customerBlock + serial;
 
-  // checksum calculation (GS1 mod10)
+  // MOD10 checksum
   let sum = 0;
   let multiplyByThree = true;
 
@@ -52,21 +48,10 @@ function generateSSCC() {
 }
 
 
-  const checkDigit = (10 - (sum % 10)) % 10;
 
-  const sscc = base + checkDigit;
-
-  console.log("✅ Generated SSCC:", sscc);
-  console.log("Length:", sscc.length);
-
-  return sscc;
-}
-
-
-
-// ------------------------------------------------
-// CREATE POSTNORD SHIPMENT
-// ------------------------------------------------
+// ----------------------------------------
+// CREATE SHIPMENT FUNCTION
+// ----------------------------------------
 async function createPostNordShipment(order) {
 
   console.log("📦 Creating PostNord shipment V3");
@@ -89,7 +74,7 @@ async function createPostNordShipment(order) {
     shipment: [
       {
         shipmentIdentification: {
-          shipmentId: String(order.id) // order reference only
+          shipmentId: String(order.id)
         },
 
         dateAndTimes: {
@@ -130,17 +115,17 @@ async function createPostNordShipment(order) {
           consignee: {
             party: {
               nameIdentification: {
-                name: order.shipping_address.name
+                name: order.shipping_address?.name || "Test Person"
               },
               address: {
-                streets: [order.shipping_address.address1],
-                postalCode: order.shipping_address.zip,
-                city: order.shipping_address.city,
-                countryCode: order.shipping_address.country_code || "SE"
+                streets: [order.shipping_address?.address1 || "Testgatan 1"],
+                postalCode: order.shipping_address?.zip || "11122",
+                city: order.shipping_address?.city || "Stockholm",
+                countryCode: order.shipping_address?.country_code || "SE"
               },
               contact: {
-                contactName: order.shipping_address.name,
-                emailAddress: order.email
+                contactName: order.shipping_address?.name || "Test Person",
+                emailAddress: order.email || "test@test.se"
               }
             }
           }
@@ -152,7 +137,7 @@ async function createPostNordShipment(order) {
             items: [
               {
                 itemIdentification: {
-                  itemId: sscc,        // THIS is the important one
+                  itemId: sscc,
                   itemIdType: "SSCC"
                 },
                 grossWeight: {
@@ -166,7 +151,6 @@ async function createPostNordShipment(order) {
       }
     ]
   };
-
 
   console.log("📡 POST →", process.env.POSTNORD_EDI_URL);
 
@@ -190,6 +174,5 @@ async function createPostNordShipment(order) {
 
   return JSON.parse(text);
 }
-
 
 module.exports = { createPostNordShipment };

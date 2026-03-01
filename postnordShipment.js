@@ -9,23 +9,48 @@ const fetch = require("node-fetch");
 // ------------------------------------------------
 // SIMPLE SSCC GENERATOR (ALWAYS 18 DIGITS)
 // ------------------------------------------------
+// ------------------------------------------------
+// POSTNORD-ALIGNED SSCC GENERATOR (BASED ON CUSTOMER NUMBER)
+// ------------------------------------------------
 function generateSSCC() {
-  const prefix = "373599999"; // test prefix from PostNord examples
 
-  // create 8-digit running number
-  const serial = String(Date.now()).slice(-8);
+  const extensionDigit = "3";
 
-  const base = prefix + serial;
+  // use YOUR PostNord customer number
+  const customer = process.env.POSTNORD_CUSTOMER_NUMBER;
 
-  // GS1 checksum calculation
+  if (!customer) {
+    throw new Error("POSTNORD_CUSTOMER_NUMBER missing");
+  }
+
+  // pad customer number to 9 digits (PostNord expects fixed length block)
+  const customerBlock = customer.toString().padStart(9, "0");
+
+  // create 7 digit serial (unique per shipment)
+  const serial = String(Date.now()).slice(-7);
+
+  const base17 = extensionDigit + customerBlock + serial;
+
+  // checksum calculation (GS1 mod10)
   let sum = 0;
   let multiplyByThree = true;
 
-  for (let i = base.length - 1; i >= 0; i--) {
-    const digit = parseInt(base[i]);
+  for (let i = base17.length - 1; i >= 0; i--) {
+    const digit = parseInt(base17[i], 10);
     sum += multiplyByThree ? digit * 3 : digit;
     multiplyByThree = !multiplyByThree;
   }
+
+  const checkDigit = (10 - (sum % 10)) % 10;
+
+  const sscc = base17 + checkDigit;
+
+  console.log("✅ Generated SSCC:", sscc);
+  console.log("Length:", sscc.length);
+
+  return sscc;
+}
+
 
   const checkDigit = (10 - (sum % 10)) % 10;
 

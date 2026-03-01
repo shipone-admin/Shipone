@@ -138,11 +138,11 @@ async function createPostNordShipment(order) {
                   unit: "KGM"
                 }
               }
-            ]
-          }
-        ]
-      }
-    ]
+            
+      
+        
+      
+    }]
   };
 
   console.log("📦 Sending payload to PostNord…");

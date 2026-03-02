@@ -14,7 +14,10 @@ async function createShipment(order) {
   // ---------------------------
   try {
     console.log("📡 Trying PostNord...");
-    const result = await createPostNordShipment(order);
+   const { createShipment } = require("./createShipment");
+
+await createShipment(order);
+
 
     console.log("✅ PostNord shipment created");
     return {

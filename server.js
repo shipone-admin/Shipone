@@ -58,7 +58,8 @@ app.post("/webhooks/orders-create", async (req, res) => {
 
     order.shipone_choice = selectedOption;
 
-    const shipmentResult = await createPostNordShipment(order);
+    const shipmentResult = await createShipment(order);
+
 
     await shipmentStore.save({
       order_id: order.id,

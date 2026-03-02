@@ -7,7 +7,8 @@ const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
 
 const { collectRates } = require("./core/rateCollector");
-const shipmentStore = require("./services/shipmentStore");
+const { saveShipment } = require("./services/shipmentStore");
+
 
 const app = express();
 app.use(express.json());
@@ -61,7 +62,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
     const shipmentResult = await createShipment(order);
 
 
-    await shipmentStore.save({
+   await saveShipment({
       order_id: order.id,
       order_name: order.name,
       carrier: selectedOption.carrier,

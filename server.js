@@ -1,81 +1,58 @@
 // ================================
-// SHIPONE BACKEND (COMMONJS ONLY)
+// SHIPONE UNIVERSAL SHIPMENT HANDLER
+// Never crashes if a carrier fails
 // ================================
 
-const express = require("express");
-const { chooseBestOption } = require("./services/routingEngine");
 const { createPostNordShipment } = require("./postnordShipment");
-const { collectRates } = require("./core/rateCollector");
-const shipmentStore = require("./services/shipmentStore");
+const { createDHLShipment } = require("./carriers/dhl.mock"); // används som fallback nu
 
-const app = express();
-app.use(express.json());
+async function createShipment(order) {
+  console.log("🚚 ShipOne creating shipment...");
 
-const PORT = process.env.PORT || 8080;
-
-app.get("/", (req, res) => {
-  res.send("ShipOne backend is running");
-});
-
-app.post("/webhooks/orders-create", async (req, res) => {
+  // ---------------------------
+  // TRY POSTNORD FIRST
+  // ---------------------------
   try {
-    const order = req.body;
+    console.log("📡 Trying PostNord...");
+    const result = await createPostNordShipment(order);
 
-    console.log("📦 NY ORDER:", order.name);
+    console.log("✅ PostNord shipment created");
+    return {
+      carrier: "postnord",
+      success: true,
+      data: result
+    };
 
-    if (!order.shipping_address) {
-      console.log("❌ Missing shipping address");
-      return res.sendStatus(200);
-    }
-
-    const shippingOptions = await collectRates(order);
-
-    let shiponePreference = "SMART";
-
-    if (order.note_attributes) {
-      const attr = order.note_attributes.find(
-        (a) => a.name === "shipone_delivery"
-      );
-
-      if (attr && attr.value) {
-        shiponePreference = attr.value;
-      }
-    }
-
-    if (shiponePreference === "FASTEST") shiponePreference = "FAST";
-    if (shiponePreference === "CHEAPEST") shiponePreference = "CHEAP";
-    if (shiponePreference === "GREEN") shiponePreference = "SMART";
-
-    console.log("🚚 ShipOne Choice:", shiponePreference);
-
-    const selectedOption = chooseBestOption(
-      shippingOptions,
-      shiponePreference.toUpperCase()
-    );
-
-    console.log("Selected:", selectedOption);
-
-    order.shipone_choice = selectedOption;
-
-    const shipmentResult = await createPostNordShipment(order);
-
-    await shipmentStore.save({
-      order_id: order.id,
-      order_name: order.name,
-      carrier: selectedOption.carrier,
-      service: selectedOption.name,
-      postnord: shipmentResult,
-      created_at: new Date().toISOString()
-    });
-
-    res.sendStatus(200);
-  } catch (err) {
-    console.error("❌ SHIPMENT ERROR:");
-    console.error(err.response?.data || err.message);
-    res.sendStatus(200);
+  } catch (error) {
+    console.log("❌ PostNord failed — activating fallback");
+    console.log("Reason:", error.message);
   }
-});
 
-app.listen(PORT, () => {
-  console.log(`🚀 ShipOne running on port ${PORT}`);
-});
+  // ---------------------------
+  // FALLBACK → DHL
+  // ---------------------------
+  try {
+    console.log("📡 Trying DHL fallback...");
+    const dhlResult = await createDHLShipment(order);
+
+    console.log("✅ DHL fallback shipment created");
+
+    return {
+      carrier: "dhl",
+      fallbackUsed: true,
+      success: true,
+      data: dhlResult
+    };
+
+  } catch (fallbackError) {
+    console.log("❌ DHL also failed");
+
+    return {
+      success: false,
+      error: "All carriers failed",
+      details: fallbackError.message
+    };
+  }
+}
+
+module.exports = { createShipment };

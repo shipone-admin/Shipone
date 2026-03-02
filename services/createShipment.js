@@ -1,10 +1,9 @@
 // ================================
 // SHIPONE UNIVERSAL SHIPMENT HANDLER
-// Never crashes if a carrier fails
 // ================================
 
-const { createPostNordShipment } = require("./postnordShipment");
-const { createDHLShipment } = require("./carriers/dhl.mock"); // används som fallback nu
+const { createPostNordShipment } = require("../postnordShipment"); 
+const { createDHLShipment } = require("../carriers/dhl.mock");
 
 async function createShipment(order) {
   console.log("🚚 ShipOne creating shipment...");
@@ -17,6 +16,7 @@ async function createShipment(order) {
     const result = await createPostNordShipment(order);
 
     console.log("✅ PostNord shipment created");
+
     return {
       carrier: "postnord",
       success: true,
@@ -56,4 +56,3 @@ async function createShipment(order) {
 }
 
 module.exports = { createShipment };
-

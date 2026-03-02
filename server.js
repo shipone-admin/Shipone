@@ -4,7 +4,8 @@
 
 const express = require("express");
 const { chooseBestOption } = require("./services/routingEngine");
-const { createPostNordShipment } = require("./postnordShipment");
+const { createShipment } = require("./services/createShipment");
+
 const { collectRates } = require("./core/rateCollector");
 const shipmentStore = require("./services/shipmentStore");
 

@@ -1,44 +1,33 @@
-// =====================================================
-// Shipment Store (ESM VERSION)
-// =====================================================
+// ================================
+// SHIPONE SHIPMENT STORE
+// Simple in-memory store (safe fallback)
+// ================================
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+const shipments = [];
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+/**
+ * Saves a shipment record
+ */
+async function saveShipment(data) {
+  console.log("💾 Saving shipment record...");
 
-const FILE = path.join(__dirname, "../data/shipments.json");
+  shipments.push({
+    id: shipments.length + 1,
+    ...data
+  });
 
-if (!fs.existsSync(FILE)) {
-  fs.writeFileSync(FILE, JSON.stringify([]));
+  console.log("✅ Shipment stored. Total:", shipments.length);
+  return true;
 }
 
-function getAll() {
-  return JSON.parse(fs.readFileSync(FILE));
+/**
+ * Debug helper — see stored shipments
+ */
+function getAllShipments() {
+  return shipments;
 }
 
-async function save(shipment) {
-  const data = getAll();
-  data.push(shipment);
-  fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
-}
-
-function stats() {
-  const data = getAll();
-
-  const groupBy = (arr, key) =>
-    arr.reduce((acc, item) => {
-      acc[item[key]] = (acc[item[key]] || 0) + 1;
-      return acc;
-    }, {});
-
-  return {
-    total_orders: data.length,
-    carriers: groupBy(data, "carrier"),
-    services: groupBy(data, "service")
-  };
-}
-
-export default { save, getAll, stats };
+module.exports = {
+  saveShipment,
+  getAllShipments
+};

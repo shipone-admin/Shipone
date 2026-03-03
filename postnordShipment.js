@@ -56,7 +56,8 @@ async function createPostNordShipment(order) {
 
   console.log("📦 Creating PostNord shipment V3");
 
-  const sscc = generateSSCC();
+ const { generateSSCC } = require("./utils/ssccGenerator");
+
 
   const payload = {
     messageDate: new Date().toISOString(),

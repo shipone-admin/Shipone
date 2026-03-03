@@ -21,9 +21,11 @@ function calculateCheckDigit(number) {
   return remainder === 0 ? 0 : 10 - remainder;
 }
 
-function generateSSCC(companyPrefix = "7300000") {
-  // Extension digit (0-9)
-  const extension = "3";
+const sscc = generateSSCC("7300000");
+
+console.log("✅ Generated SSCC:", sscc);
+console.log("Length:", sscc.length);
+
 
   // Serial reference (9 digits random)
   const serial = Math.floor(Math.random() * 1e9)

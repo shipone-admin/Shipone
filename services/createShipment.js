@@ -3,7 +3,8 @@
 // ================================
 
 const { createPostNordShipment } = require("../postnordShipment"); 
-const { createDHLShipment } = require("./carriers/dhl.service");
+const { createDHLShipment } = require("../carriers/dhl.service");
+
 
 
 async function createShipment(order) {

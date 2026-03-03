@@ -8,7 +8,7 @@ function getRates() {
       name: "Express",
       price: 109,
       eta_days: 1,
-      co2: 2.4
+      co2: 2.4,
     }
   ];
 }

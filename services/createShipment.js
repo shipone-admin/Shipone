@@ -3,7 +3,8 @@
 // ================================
 
 const { createPostNordShipment } = require("../postnordShipment"); 
-const { createDHLShipment } = require("../carriers/dhl.mock");
+const { createDHLShipment } = require("./carriers/dhl.service");
+
 
 async function createShipment(order) {
   console.log("🚚 ShipOne creating shipment...");

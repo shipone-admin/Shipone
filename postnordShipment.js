@@ -16,11 +16,12 @@ async function createPostNordShipment(order) {
     messageFunction: "Instruction",
     messageId: "SHIPONE_" + Date.now(),
 
-    application: {
-  applicationId: 1001,
+ application: {
+  applicationId: parseInt(process.env.POSTNORD_APPLICATION_ID || "1001"),
   name: "ShipOne",
   version: "1.0"
 },
+
 
 
     updateIndicator: "Original",

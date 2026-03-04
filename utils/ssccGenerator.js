@@ -1,42 +1,44 @@
 // ========================================
-// GS1 SSCC GENERATOR (Valid for PostNord)
+// SSCC GENERATOR — CLEAN VERSION
 // ========================================
 
-function calculateCheckDigit(number) {
-  const digits = number.split('').map(Number);
-  let sum = 0;
+function generateSSCC() {
 
-  for (let i = digits.length - 1; i >= 0; i--) {
-    const positionFromRight = digits.length - i;
-    const digit = digits[i];
+  const customer = process.env.POSTNORD_CUSTOMER_NUMBER;
 
-    if (positionFromRight % 2 === 0) {
-      sum += digit * 3;
-    } else {
-      sum += digit;
-    }
+  if (!customer) {
+    throw new Error("POSTNORD_CUSTOMER_NUMBER missing");
   }
 
-  const remainder = sum % 10;
-  return remainder === 0 ? 0 : 10 - remainder;
-}
+  // Extension digit (3 for shipments)
+  const extensionDigit = "3";
 
-const sscc = generateSSCC("7300000");
+  // Customer block (9 digits)
+  const customerBlock = String(customer).padStart(9, "0");
 
-console.log("✅ Generated SSCC:", sscc);
-console.log("Length:", sscc.length);
+  // Unique serial (7 digits from timestamp)
+  const serial = String(Date.now()).slice(-7);
 
+  const base17 = extensionDigit + customerBlock + serial;
 
-  // Serial reference (9 digits random)
-  const serial = Math.floor(Math.random() * 1e9)
-    .toString()
-    .padStart(9, "0");
+  // MOD10 checksum
+  let sum = 0;
+  let multiplyByThree = true;
 
-  const base = extension + companyPrefix + serial;
-  const checkDigit = calculateCheckDigit(base);
+  for (let i = base17.length - 1; i >= 0; i--) {
+    const digit = parseInt(base17[i], 10);
+    sum += multiplyByThree ? digit * 3 : digit;
+    multiplyByThree = !multiplyByThree;
+  }
 
-  return base + checkDigit;
+  const checkDigit = (10 - (sum % 10)) % 10;
+
+  const sscc = base17 + checkDigit;
+
+  console.log("✅ Generated SSCC:", sscc);
+  console.log("Length:", sscc.length);
+
+  return sscc;
 }
 
 module.exports = { generateSSCC };
-

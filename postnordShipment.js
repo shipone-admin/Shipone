@@ -3,7 +3,7 @@
 // ========================================
 
 const fetch = require("node-fetch");
-
+const { getPostNordLabel } = require("./carriers/postnord.label");
 // ----------------------------------------
 // CREATE SHIPMENT FUNCTION
 // ----------------------------------------

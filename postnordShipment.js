@@ -10,13 +10,7 @@ const fetch = require("node-fetch");
 async function createPostNordShipment(order) {
 
   console.log("📦 Creating PostNord shipment V4 (S10 auto)");
-import { getPostNordLabel } from "./postnord.label.js";
 
-const labelData = await getPostNordLabel(printId);
-
-if (labelData) {
-  console.log("📄 Label response:", labelData);
-}
 
   const payload = {
     messageDate: new Date().toISOString(),

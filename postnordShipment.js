@@ -127,8 +127,25 @@ async function createPostNordShipment(order) {
   if (!response.ok) {
     throw new Error(text);
   }
+const data = JSON.parse(text);
 
-  return JSON.parse(text);
+// Hämta printId
+const printId =
+  data.idInformation &&
+  data.idInformation[0] &&
+  data.idInformation[0].ids &&
+  data.idInformation[0].ids[0] &&
+  data.idInformation[0].ids[0].printId;
+
+if (printId) {
+  console.log("🖨 Fetching label with printId:", printId);
+  const labelData = await getPostNordLabel(printId);
+  console.log("📄 Label response:", labelData);
+}
+
+return data;
+
+ 
 }
 
 module.exports = { createPostNordShipment };

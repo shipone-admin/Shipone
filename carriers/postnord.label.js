@@ -1,6 +1,6 @@
-import fetch from "node-fetch";
+const fetch = require("node-fetch");
 
-export async function getPostNordLabel(printId) {
+async function getPostNordLabel(printId) {
   try {
     const response = await fetch(
       "https://api2.postnord.com/rest/shipment/v3/labels",
@@ -8,14 +8,12 @@ export async function getPostNordLabel(printId) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Basic ${Buffer.from(
-            process.env.POSTNORD_API_KEY + ":" + process.env.POSTNORD_API_SECRET
-          ).toString("base64")}`,
+          "X-IBM-Client-Id": process.env.POSTNORD_API_KEY
         },
         body: JSON.stringify({
           printIds: [printId],
-          format: "PDF",
-        }),
+          format: "PDF"
+        })
       }
     );
 
@@ -34,3 +32,5 @@ export async function getPostNordLabel(printId) {
     return null;
   }
 }
+
+module.exports = { getPostNordLabel };

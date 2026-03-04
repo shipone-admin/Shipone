@@ -3,42 +3,7 @@
 // ========================================
 
 const fetch = require("node-fetch");
-
-
-
-
-  // Extension digit (always 3 for shipments)
-  const extensionDigit = "3";
-
-  // PostNord expects your customer number inside the SSCC
-  const customerBlock = String(customer).padStart(9, "0");
-
-  // Unique running number (7 digits)
-  const serial = String(Date.now()).slice(-7);
-
-  const base17 = extensionDigit + customerBlock + serial;
-
-  // MOD10 checksum
-  let sum = 0;
-  let multiplyByThree = true;
-
-  for (let i = base17.length - 1; i >= 0; i--) {
-    const digit = parseInt(base17[i], 10);
-    sum += multiplyByThree ? digit * 3 : digit;
-    multiplyByThree = !multiplyByThree;
-  }
-
-  const checkDigit = (10 - (sum % 10)) % 10;
-
-  const sscc = base17 + checkDigit;
-
-  console.log("✅ Generated SSCC:", sscc);
-  console.log("Length:", sscc.length);
-
-  return sscc;
-}
-
-
+const { generateSSCC } = require("./utils/ssccGenerator");
 
 // ----------------------------------------
 // CREATE SHIPMENT FUNCTION
@@ -47,9 +12,7 @@ async function createPostNordShipment(order) {
 
   console.log("📦 Creating PostNord shipment V3");
 
- const { generateSSCC } = require("./utils/ssccGenerator");
-const sscc = generateSSCC();
-
+  const sscc = generateSSCC();
 
   const payload = {
     messageDate: new Date().toISOString(),

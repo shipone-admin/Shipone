@@ -12,7 +12,7 @@ async function createPostNordShipment(order) {
 
   console.log("📦 Creating PostNord shipment V3");
 
-  const sscc = generateSSCC();
+  const sscc = "373000000000000015";
 
   const payload = {
     messageDate: new Date().toISOString(),

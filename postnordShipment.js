@@ -5,16 +5,7 @@
 const fetch = require("node-fetch");
 
 
-// ----------------------------------------
-// SSCC GENERATOR (POSTNORD COMPATIBLE)
-// ----------------------------------------
-function generateSSCC() {
 
-  const customer = process.env.POSTNORD_CUSTOMER_NUMBER;
-
-  if (!customer) {
-    throw new Error("POSTNORD_CUSTOMER_NUMBER missing");
-  }
 
   // Extension digit (always 3 for shipments)
   const extensionDigit = "3";
@@ -57,6 +48,7 @@ async function createPostNordShipment(order) {
   console.log("📦 Creating PostNord shipment V3");
 
  const { generateSSCC } = require("./utils/ssccGenerator");
+const sscc = generateSSCC();
 
 
   const payload = {

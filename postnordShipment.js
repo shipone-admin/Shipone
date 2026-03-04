@@ -1,18 +1,15 @@
 // ========================================
-// POSTNORD SHIPMENT V3 — CLEAN FULL FILE
+// POSTNORD SHIPMENT V4 — S10 AUTO ID
 // ========================================
 
 const fetch = require("node-fetch");
-const { generateSSCC } = require("./utils/ssccGenerator");
 
 // ----------------------------------------
 // CREATE SHIPMENT FUNCTION
 // ----------------------------------------
 async function createPostNordShipment(order) {
 
-  console.log("📦 Creating PostNord shipment V3");
-
-  const sscc = "373000000000000015";
+  console.log("📦 Creating PostNord shipment V4 (S10 auto)");
 
   const payload = {
     messageDate: new Date().toISOString(),
@@ -93,8 +90,8 @@ async function createPostNordShipment(order) {
             items: [
               {
                 itemIdentification: {
-                  itemId: sscc,
-                  itemIdType: "SSCC"
+                  itemId: "0",
+                  itemIdType: "S10"
                 },
                 grossWeight: {
                   value: 1,

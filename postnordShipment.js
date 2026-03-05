@@ -1,114 +1,95 @@
 // ========================================
-// POSTNORD SHIPMENT V4 — S10 AUTO ID
+// POSTNORD SHIPMENT V5 — S10 + TRACKING
 // ========================================
 
 const fetch = require("node-fetch");
 const { getPostNordLabel } = require("./carriers/postnord.label");
-// ----------------------------------------
-// CREATE SHIPMENT FUNCTION
-// ----------------------------------------
-async function createPostNordShipment(order) {
 
-  console.log("📦 Creating PostNord shipment V4 (S10 auto)");
+async function postnordShipment(order) {
 
+  console.log("📦 Creating PostNord shipment V5");
 
   const payload = {
     messageDate: new Date().toISOString(),
     messageFunction: "Instruction",
     messageId: "SHIPONE_" + Date.now(),
 
- application: {
-  applicationId: parseInt(process.env.POSTNORD_APPLICATION_ID || "1001"),
-  name: "ShipOne",
-  version: "1.0"
-},
-
-
+    application: {
+      applicationId: parseInt(process.env.POSTNORD_APPLICATION_ID || "1001"),
+      name: "ShipOne",
+      version: "1.0"
+    },
 
     updateIndicator: "Original",
 
-    shipment: [
-      {
-        shipmentIdentification: {
-          shipmentId: String(order.id)
-        },
+    shipment: [{
+      shipmentIdentification: {
+        shipmentId: String(order.id)
+      },
 
-        dateAndTimes: {
-          loadingDate: new Date().toISOString()
-        },
+      dateAndTimes: {
+        loadingDate: new Date().toISOString()
+      },
 
-        service: {
-          basicServiceCode: "18"
-        },
+      service: {
+        basicServiceCode: "18"
+      },
 
-        numberOfPackages: {
-          value: 1
-        },
+      numberOfPackages: { value: 1 },
 
-        totalGrossWeight: {
-          value: 1,
-          unit: "KGM"
-        },
+      totalGrossWeight: {
+        value: 1,
+        unit: "KGM"
+      },
 
-        parties: {
-          consignor: {
-            issuerCode: "Z12",
-            partyIdentification: {
-              partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
-              partyIdType: "160"
-            },
-            party: {
-              nameIdentification: { name: "ShipOne" },
-              address: {
-                streets: ["Terminalvägen 24"],
-                postalCode: "17173",
-                city: "Solna",
-                countryCode: "SE"
-              }
-            }
+      parties: {
+        consignor: {
+          issuerCode: "Z12",
+          partyIdentification: {
+            partyId: process.env.POSTNORD_CUSTOMER_NUMBER,
+            partyIdType: "160"
           },
-
-          consignee: {
-            party: {
-              nameIdentification: {
-                name: order.shipping_address?.name || "Test Person"
-              },
-              address: {
-                streets: [order.shipping_address?.address1 || "Testgatan 1"],
-                postalCode: order.shipping_address?.zip || "11122",
-                city: order.shipping_address?.city || "Stockholm",
-                countryCode: order.shipping_address?.country_code || "SE"
-              },
-              contact: {
-                contactName: order.shipping_address?.name || "Test Person",
-                emailAddress: order.email || "test@test.se"
-              }
+          party: {
+            nameIdentification: { name: "ShipOne" },
+            address: {
+              streets: ["Terminalvägen 24"],
+              postalCode: "17173",
+              city: "Solna",
+              countryCode: "SE"
             }
           }
         },
 
-        goodsItem: [
-          {
-            packageTypeCode: "PC",
-            items: [
-              {
-                itemIdentification: {
-                  itemId: "0",
-                  itemIdType: "S10"
-                },
-                grossWeight: {
-                  value: 1,
-                  unit: "KGM"
-                }
-              }
-            ]
+        consignee: {
+          party: {
+            nameIdentification: {
+              name: order.shipping_address?.name || "Test Person"
+            },
+            address: {
+              streets: [order.shipping_address?.address1 || "Testgatan 1"],
+              postalCode: order.shipping_address?.zip || "11122",
+              city: order.shipping_address?.city || "Stockholm",
+              countryCode: order.shipping_address?.country_code || "SE"
+            }
           }
-        ]
-      }
-    ]
-  };
+        }
+      },
 
-  console.log("📡 POST →", process.env.POSTNORD_EDI_URL);
+      goodsItem: [{
+        packageTypeCode: "PC",
+        items: [{
+          itemIdentification: {
+            itemId: "0",
+            itemIdType: "S10"
+          },
+          grossWeight: {
+            value: 1,
+            unit: "KGM"
+          }
+        }]
+      }]
+    }]
+  };
 
   const response = await fetch(process.env.POSTNORD_EDI_URL, {
     method: "POST",
@@ -121,31 +102,26 @@ async function createPostNordShipment(order) {
 
   const text = await response.text();
 
-  console.log("PostNord status:", response.status);
-  console.log("PostNord response:", text);
-
   if (!response.ok) {
     throw new Error(text);
   }
-const data = JSON.parse(text);
 
-// Hämta printId
-const printId =
-  data.idInformation &&
-  data.idInformation[0] &&
-  data.idInformation[0].ids &&
-  data.idInformation[0].ids[0] &&
-  data.idInformation[0].ids[0].printId;
+  const data = JSON.parse(text);
 
-if (printId) {
-  console.log("🖨 Fetching label with printId:", printId);
-  const labelData = await getPostNordLabel(printId);
-  console.log("📄 Label response:", labelData);
+  const idInfo = data.idInformation[0];
+
+  const trackingNumber = idInfo.ids[0].value;
+  const printId = idInfo.ids[0].printId;
+  const trackingUrl = idInfo.urls[0].url;
+
+  console.log("📦 Tracking:", trackingNumber);
+  console.log("🖨 PrintId:", printId);
+
+  return {
+    trackingNumber,
+    trackingUrl,
+    printId
+  };
 }
 
-return data;
-
- 
-}
-
-module.exports = { createPostNordShipment };
+module.exports = { postnordShipment };

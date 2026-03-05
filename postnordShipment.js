@@ -5,7 +5,8 @@
 const fetch = require("node-fetch");
 const { getPostNordLabel } = require("./carriers/postnord.label");
 
-async function postnordShipment(order) {
+async function createPostNordShipment(order)
+ {
 
   console.log("📦 Creating PostNord shipment V5");
 
@@ -124,4 +125,4 @@ async function postnordShipment(order) {
   };
 }
 
-module.exports = { postnordShipment };
+module.exports = { createpostnordShipment };

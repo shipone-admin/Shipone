@@ -125,4 +125,6 @@ async function createPostNordShipment(order)
   };
 }
 
-module.exports = { createpostnordShipment };
+module.exports = { createPostNordShipment };
+
+

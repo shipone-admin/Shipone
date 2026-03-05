@@ -3,7 +3,7 @@ const fetch = require("node-fetch");
 async function getPostNordLabel(printId) {
   try {
     const response = await fetch(
-      "https://api2.postnord.com/rest/shipment/v3/labels",
+      "https://api2.postnord.com/rest/shipment/v3/label",
       {
         method: "POST",
         headers: {

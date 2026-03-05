@@ -1,36 +1,32 @@
 const fetch = require("node-fetch");
 
 async function getPostNordLabel(printId) {
-  try {
-    const response = await fetch(
-      "https://api2.postnord.com/rest/shipment/v3/label",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-IBM-Client-Id": process.env.POSTNORD_API_KEY
-        },
-        body: JSON.stringify({
-          printIds: [printId],
-          format: "PDF"
-        })
-      }
-    );
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error("❌ Label error:", data);
-      return null;
+  const response = await fetch(
+    "https://api2.postnord.com/rest/shipment/v3/labels/ids/pdf",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-IBM-Client-Id": process.env.POSTNORD_API_KEY
+      },
+      body: JSON.stringify({
+        ids: [printId]
+      })
     }
+  );
 
-    console.log("✅ Label fetched from PostNord");
-    return data;
-
-  } catch (error) {
-    console.error("❌ Label fetch failed:", error);
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("❌ Label error:", errorText);
     return null;
   }
+
+  const pdfBuffer = await response.buffer();
+
+  console.log("✅ Label PDF received");
+
+  return pdfBuffer;
 }
 
 module.exports = { getPostNordLabel };

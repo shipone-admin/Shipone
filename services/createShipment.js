@@ -1,6 +1,7 @@
 // ================================
 // SHIPONE UNIVERSAL SHIPMENT HANDLER
 // ================================
+const { fulfillShopifyOrder } = require("./shopifyfulfillment");
 
 const { createPostNordShipment } = require("../postnordShipment"); 
 const { createDHLShipment } = require("../carriers/dhl.service");

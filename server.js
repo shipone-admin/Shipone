@@ -5,6 +5,7 @@
 const express = require("express");
 const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
+const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
 
 const { collectRates } = require("./core/rateCollector");
 const { saveShipment } = require("./services/shipmentStore");
@@ -60,6 +61,18 @@ app.post("/webhooks/orders-create", async (req, res) => {
     order.shipone_choice = selectedOption;
 
     const shipmentResult = await createShipment(order);
+
+if (shipmentResult.success && shipmentResult.data) {
+
+  await fulfillShopifyOrder(
+    order.id,
+    shipmentResult.data.trackingNumber,
+    shipmentResult.data.trackingUrl
+  );
+
+  console.log("📦 Shopify order fulfilled");
+}
+
 
 
    await saveShipment({

@@ -16,15 +16,25 @@ async function createShipment(order) {
   // ---------------------------
   try {
     console.log("📡 Trying PostNord...");
-    const result = await createPostNordShipment(order);
+   const result = await createPostNordShipment(order);
 
-    console.log("✅ PostNord shipment created");
+console.log("✅ PostNord shipment created");
 
-    return {
-      carrier: "postnord",
-      success: true,
-      data: result
-    };
+// Shopify fulfillment
+await fulfillShopifyOrder(
+  order.id,
+  result.trackingNumber,
+  result.trackingUrl
+);
+
+console.log("📦 Shopify order fulfilled");
+
+return {
+  carrier: "postnord",
+  success: true,
+  data: result
+};
+
 
   } catch (error) {
     console.log("❌ PostNord failed — activating fallback");

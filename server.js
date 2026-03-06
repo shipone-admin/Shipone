@@ -1,9 +1,9 @@
 // ================================
-// SHIPONE BACKEND (COMMONJS ONLY)
+// SHIPONE BACKEND (CLEAN VERSION)
 // ================================
 
 const express = require("express");
-const fetch = require("node-fetch");
+const axios = require("axios");
 
 const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
@@ -18,24 +18,28 @@ const PORT = process.env.PORT || 8080;
 
 
 // ================================
-// ROOT
+// ROOT TEST
 // ================================
 app.get("/", (req, res) => {
   res.send("ShipOne backend is running");
 });
+
+
 // ================================
 // SHOPIFY OAUTH CALLBACK
 // ================================
-
-const axios = require("axios");
-
 app.get("/oauth/callback", async (req, res) => {
+
   try {
 
     const { code, shop } = req.query;
 
-    console.log("🔑 OAuth code:", code);
-    console.log("🏪 Shop:", shop);
+    console.log("SHOP:", shop);
+    console.log("CODE:", code);
+
+    if (!code) {
+      return res.send("No OAuth code received");
+    }
 
     const response = await axios.post(
       `https://${shop}/admin/oauth/access_token`,
@@ -48,59 +52,16 @@ app.get("/oauth/callback", async (req, res) => {
 
     const accessToken = response.data.access_token;
 
-    console.log("✅ SHOPIFY ACCESS TOKEN:", accessToken);
-
-    res.send("Shopify app installed successfully");
-
-  } catch (error) {
-
-    console.error("❌ OAuth error:", error.response?.data || error.message);
-
-    res.send("OAuth failed");
-
-  }
-});
-
-
-// ================================
-// SHOPIFY OAUTH CALLBACK
-// ================================
-app.get("/oauth/callback", async (req, res) => {
-
-  const code = req.query.code;
-  const shop = req.query.shop;
-
-  console.log("SHOP:", shop);
-  console.log("CODE:", code);
-
-  if (!code) {
-    return res.send("No OAuth code received");
-  }
-
-  try {
-
-    const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        client_id: process.env.SHOPIFY_CLIENT_ID,
-        client_secret: process.env.SHOPIFY_CLIENT_SECRET,
-        code: code
-      })
-    });
-
-    const data = await response.json();
-
-    console.log("SHOPIFY ACCESS TOKEN:");
-    console.log(data.access_token);
+    console.log("✅ SHOPIFY ACCESS TOKEN:");
+    console.log(accessToken);
 
     res.send("TOKEN GENERATED. CHECK RAILWAY LOGS.");
 
   } catch (error) {
 
-    console.log("OAuth error:", error.message);
+    console.error("❌ OAuth error:");
+    console.error(error.response?.data || error.message);
+
     res.send("OAuth failed");
 
   }
@@ -117,7 +78,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
 
     const order = req.body;
 
-    console.log("📦 NY ORDER:", order.name);
+    console.log("📦 NEW ORDER:", order.name);
 
     if (!order.shipping_address) {
       console.log("❌ Missing shipping address");

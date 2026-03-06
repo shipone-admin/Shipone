@@ -23,6 +23,43 @@ const PORT = process.env.PORT || 8080;
 app.get("/", (req, res) => {
   res.send("ShipOne backend is running");
 });
+// ================================
+// SHOPIFY OAUTH CALLBACK
+// ================================
+
+const axios = require("axios");
+
+app.get("/oauth/callback", async (req, res) => {
+  try {
+
+    const { code, shop } = req.query;
+
+    console.log("🔑 OAuth code:", code);
+    console.log("🏪 Shop:", shop);
+
+    const response = await axios.post(
+      `https://${shop}/admin/oauth/access_token`,
+      {
+        client_id: process.env.SHOPIFY_CLIENT_ID,
+        client_secret: process.env.SHOPIFY_CLIENT_SECRET,
+        code: code
+      }
+    );
+
+    const accessToken = response.data.access_token;
+
+    console.log("✅ SHOPIFY ACCESS TOKEN:", accessToken);
+
+    res.send("Shopify app installed successfully");
+
+  } catch (error) {
+
+    console.error("❌ OAuth error:", error.response?.data || error.message);
+
+    res.send("OAuth failed");
+
+  }
+});
 
 
 // ================================

@@ -22,10 +22,17 @@ async function fulfillShopifyOrder(orderId, trackingNumber, trackingUrl) {
 
     const fulfillmentOrdersData = await fulfillmentOrdersRes.json();
 
-    if (!fulfillmentOrdersData.fulfillment_orders.length) {
-      console.log("❌ No fulfillment orders found");
-      return;
-    }
+console.log("📡 Shopify fulfillment_orders response:");
+console.log(JSON.stringify(fulfillmentOrdersData, null, 2));
+
+if (
+  !fulfillmentOrdersData.fulfillment_orders ||
+  fulfillmentOrdersData.fulfillment_orders.length === 0
+) {
+  console.log("❌ No fulfillment orders found for this order");
+  return;
+}
+
 
     const fulfillmentOrderId =
       fulfillmentOrdersData.fulfillment_orders[0].id;

@@ -1,5 +1,6 @@
 // ================================
 // SHIPONE BACKEND (CLEAN VERSION)
+// CARRIER-AWARE FLOW
 // ================================
 
 const express = require("express");
@@ -99,11 +100,28 @@ app.post("/webhooks/orders-create", async (req, res) => {
       shiponePreference.toUpperCase()
     );
 
-    console.log("Selected:", selectedOption);
+    if (!selectedOption) {
+      console.log("❌ No shipping option could be selected");
+
+      await saveShipment({
+        order_id: order.id,
+        order_name: order.name,
+        shipone_choice: shiponePreference,
+        shipment_success: false,
+        fulfillment_success: false,
+        error: "No shipping option selected",
+        created_at: new Date().toISOString()
+      });
+
+      return res.sendStatus(200);
+    }
+
+    console.log("✅ Selected option:");
+    console.log(selectedOption);
 
     order.shipone_choice = selectedOption;
 
-    const shipmentResult = await createShipment(order);
+    const shipmentResult = await createShipment(order, selectedOption);
 
     let fulfillmentResult = {
       success: false,
@@ -141,9 +159,13 @@ app.post("/webhooks/orders-create", async (req, res) => {
     await saveShipment({
       order_id: order.id,
       order_name: order.name,
-      carrier: shipmentResult.carrier || selectedOption?.carrier || null,
-      service: selectedOption?.name || null,
       shipone_choice: shiponePreference,
+      selected_option: selectedOption,
+      selected_carrier: selectedOption.carrier || null,
+      selected_service: selectedOption.name || null,
+      actual_carrier: shipmentResult.carrier || null,
+      fallback_used: shipmentResult.fallbackUsed || false,
+      fallback_from: shipmentResult.fallbackFrom || null,
       shipment_success: shipmentResult.success,
       shipment_result: shipmentResult,
       fulfillment_success: fulfillmentResult.success || false,

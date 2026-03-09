@@ -1,6 +1,6 @@
 // ================================
 // SHIPONE BACKEND
-// IDEMPOTENCY VERSION
+// HMAC + IDEMPOTENCY VERSION
 // ================================
 
 const express = require("express");
@@ -15,11 +15,22 @@ const {
   completeOrderProcessing,
   failOrderProcessing
 } = require("./services/shipmentStore");
+const { verifyShopifyWebhook } = require("./services/shopifyWebhookVerify");
 
 const app = express();
-app.use(express.json());
-
 const PORT = process.env.PORT || 8080;
+
+// ================================
+// GLOBAL JSON PARSER
+// ================================
+// Use normal JSON parsing for everything except Shopify webhook route.
+app.use((req, res, next) => {
+  if (req.originalUrl === "/webhooks/orders-create") {
+    return next();
+  }
+
+  express.json()(req, res, next);
+});
 
 // ================================
 // ROOT TEST
@@ -67,158 +78,196 @@ app.get("/oauth/callback", async (req, res) => {
 
 // ================================
 // SHOPIFY ORDER WEBHOOK
+// HMAC VERIFIED + RAW BODY
 // ================================
-app.post("/webhooks/orders-create", async (req, res) => {
-  const order = req.body;
+app.post(
+  "/webhooks/orders-create",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    let order = null;
 
-  try {
-    console.log("📦 NEW ORDER:", order.name);
+    try {
+      const rawBody = req.body.toString("utf8");
+      const hmacHeader = req.get("X-Shopify-Hmac-Sha256");
+      const webhookTopic = req.get("X-Shopify-Topic");
+      const webhookShop = req.get("X-Shopify-Shop-Domain");
+      const webhookId = req.get("X-Shopify-Webhook-Id");
+      const webhookTriggeredAt = req.get("X-Shopify-Triggered-At");
 
-    if (!order || !order.id) {
-      console.log("❌ Missing order id");
-      return res.sendStatus(200);
-    }
-
-    const processingState = beginOrderProcessing(order);
-
-    if (!processingState.started) {
-      if (processingState.reason === "already_processing") {
-        console.log("🛑 Duplicate webhook blocked: order already processing");
-        console.log("Order ID:", order.id);
-        return res.sendStatus(200);
-      }
-
-      if (processingState.reason === "already_completed") {
-        console.log("🛑 Duplicate webhook blocked: order already completed");
-        console.log("Order ID:", order.id);
-        return res.sendStatus(200);
-      }
-    }
-
-    console.log("🔒 Idempotency lock created for order:", order.id);
-
-    if (!order.shipping_address) {
-      console.log("❌ Missing shipping address");
-
-      failOrderProcessing(order.id, {
-        order_name: order.name,
-        error: "Missing shipping address"
-      });
-
-      return res.sendStatus(200);
-    }
-
-    const shippingOptions = await collectRates(order);
-
-    let shiponePreference = "SMART";
-
-    if (Array.isArray(order.note_attributes)) {
-      const attr = order.note_attributes.find(
-        (a) => a.name === "shipone_delivery"
+      const isValid = verifyShopifyWebhook(
+        rawBody,
+        hmacHeader,
+        process.env.SHOPIFY_API_SECRET
       );
 
-      if (attr && attr.value) {
-        shiponePreference = attr.value;
+      if (!isValid) {
+        console.log("❌ Invalid Shopify webhook HMAC");
+        console.log("Topic:", webhookTopic);
+        console.log("Shop:", webhookShop);
+        console.log("Webhook ID:", webhookId);
+
+        return res.sendStatus(401);
       }
-    }
 
-    if (shiponePreference === "FASTEST") shiponePreference = "FAST";
-    if (shiponePreference === "CHEAPEST") shiponePreference = "CHEAP";
-    if (shiponePreference === "GREEN") shiponePreference = "SMART";
+      console.log("✅ Shopify webhook verified");
+      console.log("Topic:", webhookTopic);
+      console.log("Shop:", webhookShop);
+      console.log("Webhook ID:", webhookId || "N/A");
+      console.log("Triggered At:", webhookTriggeredAt || "N/A");
 
-    console.log("🚚 ShipOne Choice:", shiponePreference);
+      order = JSON.parse(rawBody);
 
-    const selectedOption = chooseBestOption(
-      shippingOptions,
-      shiponePreference.toUpperCase()
-    );
+      console.log("📦 NEW ORDER:", order.name);
 
-    if (!selectedOption) {
-      console.log("❌ No shipping option could be selected");
+      if (!order || !order.id) {
+        console.log("❌ Missing order id");
+        return res.sendStatus(200);
+      }
 
-      failOrderProcessing(order.id, {
+      const processingState = beginOrderProcessing(order);
+
+      if (!processingState.started) {
+        if (processingState.reason === "already_processing") {
+          console.log("🛑 Duplicate webhook blocked: order already processing");
+          console.log("Order ID:", order.id);
+          return res.sendStatus(200);
+        }
+
+        if (processingState.reason === "already_completed") {
+          console.log("🛑 Duplicate webhook blocked: order already completed");
+          console.log("Order ID:", order.id);
+          return res.sendStatus(200);
+        }
+      }
+
+      console.log("🔒 Idempotency lock created for order:", order.id);
+
+      if (!order.shipping_address) {
+        console.log("❌ Missing shipping address");
+
+        failOrderProcessing(order.id, {
+          order_name: order.name,
+          error: "Missing shipping address"
+        });
+
+        return res.sendStatus(200);
+      }
+
+      const shippingOptions = await collectRates(order);
+
+      let shiponePreference = "SMART";
+
+      if (Array.isArray(order.note_attributes)) {
+        const attr = order.note_attributes.find(
+          (a) => a.name === "shipone_delivery"
+        );
+
+        if (attr && attr.value) {
+          shiponePreference = attr.value;
+        }
+      }
+
+      if (shiponePreference === "FASTEST") shiponePreference = "FAST";
+      if (shiponePreference === "CHEAPEST") shiponePreference = "CHEAP";
+      if (shiponePreference === "GREEN") shiponePreference = "SMART";
+
+      console.log("🚚 ShipOne Choice:", shiponePreference);
+
+      const selectedOption = chooseBestOption(
+        shippingOptions,
+        shiponePreference.toUpperCase()
+      );
+
+      if (!selectedOption) {
+        console.log("❌ No shipping option could be selected");
+
+        failOrderProcessing(order.id, {
+          order_name: order.name,
+          shipone_choice: shiponePreference,
+          error: "No shipping option selected"
+        });
+
+        return res.sendStatus(200);
+      }
+
+      console.log("✅ Selected option:");
+      console.log(selectedOption);
+
+      order.shipone_choice = selectedOption;
+
+      const shipmentResult = await createShipment(order, selectedOption);
+
+      let fulfillmentResult = {
+        success: false,
+        skipped: true,
+        reason: "Shipment was not created"
+      };
+
+      if (shipmentResult.success && shipmentResult.data) {
+        fulfillmentResult = await fulfillShopifyOrder(
+          order.id,
+          shipmentResult.data.trackingNumber,
+          shipmentResult.data.trackingUrl
+        );
+
+        if (fulfillmentResult.success) {
+          console.log("✅ Shopify fulfillment completed");
+        } else {
+          console.log("❌ Shopify fulfillment failed");
+          console.log(
+            JSON.stringify(
+              {
+                step: fulfillmentResult.step,
+                status: fulfillmentResult.status,
+                error: fulfillmentResult.error
+              },
+              null,
+              2
+            )
+          );
+        }
+      } else {
+        console.log("❌ Shipment creation failed, skipping Shopify fulfillment");
+      }
+
+      completeOrderProcessing(order.id, {
         order_name: order.name,
         shipone_choice: shiponePreference,
-        error: "No shipping option selected"
+        selected_option: selectedOption,
+        selected_carrier: selectedOption.carrier || null,
+        selected_service: selectedOption.name || null,
+        actual_carrier: shipmentResult.carrier || null,
+        fallback_used: shipmentResult.fallbackUsed || false,
+        fallback_from: shipmentResult.fallbackFrom || null,
+        shipment_success: shipmentResult.success,
+        shipment_result: shipmentResult,
+        fulfillment_success: fulfillmentResult.success || false,
+        fulfillment_result: fulfillmentResult,
+        webhook_topic: webhookTopic || null,
+        webhook_shop: webhookShop || null,
+        webhook_id: webhookId || null,
+        completed_at: new Date().toISOString()
       });
+
+      console.log("💾 Shipment stored with completed status");
+
+      return res.sendStatus(200);
+    } catch (err) {
+      console.error("❌ SHIPMENT ERROR:");
+      console.error(err.response?.data || err.message);
+
+      if (order && order.id) {
+        failOrderProcessing(order.id, {
+          order_name: order.name,
+          error: err.response?.data || err.message,
+          failed_at: new Date().toISOString()
+        });
+      }
 
       return res.sendStatus(200);
     }
-
-    console.log("✅ Selected option:");
-    console.log(selectedOption);
-
-    order.shipone_choice = selectedOption;
-
-    const shipmentResult = await createShipment(order, selectedOption);
-
-    let fulfillmentResult = {
-      success: false,
-      skipped: true,
-      reason: "Shipment was not created"
-    };
-
-    if (shipmentResult.success && shipmentResult.data) {
-      fulfillmentResult = await fulfillShopifyOrder(
-        order.id,
-        shipmentResult.data.trackingNumber,
-        shipmentResult.data.trackingUrl
-      );
-
-      if (fulfillmentResult.success) {
-        console.log("✅ Shopify fulfillment completed");
-      } else {
-        console.log("❌ Shopify fulfillment failed");
-        console.log(
-          JSON.stringify(
-            {
-              step: fulfillmentResult.step,
-              status: fulfillmentResult.status,
-              error: fulfillmentResult.error
-            },
-            null,
-            2
-          )
-        );
-      }
-    } else {
-      console.log("❌ Shipment creation failed, skipping Shopify fulfillment");
-    }
-
-    completeOrderProcessing(order.id, {
-      order_name: order.name,
-      shipone_choice: shiponePreference,
-      selected_option: selectedOption,
-      selected_carrier: selectedOption.carrier || null,
-      selected_service: selectedOption.name || null,
-      actual_carrier: shipmentResult.carrier || null,
-      fallback_used: shipmentResult.fallbackUsed || false,
-      fallback_from: shipmentResult.fallbackFrom || null,
-      shipment_success: shipmentResult.success,
-      shipment_result: shipmentResult,
-      fulfillment_success: fulfillmentResult.success || false,
-      fulfillment_result: fulfillmentResult,
-      completed_at: new Date().toISOString()
-    });
-
-    console.log("💾 Shipment stored with completed status");
-
-    res.sendStatus(200);
-  } catch (err) {
-    console.error("❌ SHIPMENT ERROR:");
-    console.error(err.response?.data || err.message);
-
-    if (order && order.id) {
-      failOrderProcessing(order.id, {
-        order_name: order.name,
-        error: err.response?.data || err.message,
-        failed_at: new Date().toISOString()
-      });
-    }
-
-    res.sendStatus(200);
   }
-});
+);
 
 app.listen(PORT, () => {
   console.log(`🚀 ShipOne running on port ${PORT}`);

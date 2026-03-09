@@ -1,8 +1,3 @@
-// ================================
-// SHIPONE SHIPMENT STORE
-// POSTGRES VERSION
-// ================================
-
 const { query } = require("./db");
 
 function buildBaseRecord(order) {
@@ -481,9 +476,11 @@ async function readShipments() {
 }
 
 async function getRecentShipments(limit = 20) {
+  const safeLimit = Number.isFinite(Number(limit)) ? Number(limit) : 20;
+
   const result = await query(
     `SELECT * FROM shipments ORDER BY updated_at DESC LIMIT $1`,
-    [limit]
+    [safeLimit]
   );
 
   return result.rows.map(mapRow);

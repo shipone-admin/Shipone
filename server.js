@@ -1,7 +1,6 @@
 // ================================
 // SHIPONE BACKEND
-// IDEMPOTENCY VERSION
-// STABLE ROLLBACK (NO HMAC)
+// STRUCTURED STORE VERSION
 // ================================
 
 const express = require("express");
@@ -13,8 +12,8 @@ const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
 const { collectRates } = require("./core/rateCollector");
 const {
   beginOrderProcessing,
-  completeOrderProcessing,
-  failOrderProcessing
+  failOrderProcessing,
+  saveShipmentOutcome
 } = require("./services/shipmentStore");
 
 const app = express();
@@ -73,7 +72,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
 
   try {
-    console.log("📦 NEW ORDER:", order.name);
+    console.log("📦 NEW ORDER:", order?.name);
 
     if (!order || !order.id) {
       console.log("❌ Missing order id");
@@ -159,11 +158,17 @@ app.post("/webhooks/orders-create", async (req, res) => {
       reason: "Shipment was not created"
     };
 
+    let trackingNumber = null;
+    let trackingUrl = null;
+
     if (shipmentResult.success && shipmentResult.data) {
+      trackingNumber = shipmentResult.data.trackingNumber || null;
+      trackingUrl = shipmentResult.data.trackingUrl || null;
+
       fulfillmentResult = await fulfillShopifyOrder(
         order.id,
-        shipmentResult.data.trackingNumber,
-        shipmentResult.data.trackingUrl
+        trackingNumber,
+        trackingUrl
       );
 
       if (fulfillmentResult.success) {
@@ -175,7 +180,8 @@ app.post("/webhooks/orders-create", async (req, res) => {
             {
               step: fulfillmentResult.step,
               status: fulfillmentResult.status,
-              error: fulfillmentResult.error
+              error: fulfillmentResult.error,
+              attempts: fulfillmentResult.attempts || 1
             },
             null,
             2
@@ -186,8 +192,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
       console.log("❌ Shipment creation failed, skipping Shopify fulfillment");
     }
 
-    completeOrderProcessing(order.id, {
-      order_name: order.name,
+    const storedRecord = saveShipmentOutcome(order, {
       shipone_choice: shiponePreference,
       selected_option: selectedOption,
       selected_carrier: selectedOption.carrier || null,
@@ -195,14 +200,37 @@ app.post("/webhooks/orders-create", async (req, res) => {
       actual_carrier: shipmentResult.carrier || null,
       fallback_used: shipmentResult.fallbackUsed || false,
       fallback_from: shipmentResult.fallbackFrom || null,
+      tracking_number: trackingNumber,
+      tracking_url: trackingUrl,
       shipment_success: shipmentResult.success,
-      shipment_result: shipmentResult,
       fulfillment_success: fulfillmentResult.success || false,
+      shipment_result: shipmentResult,
       fulfillment_result: fulfillmentResult,
-      completed_at: new Date().toISOString()
+      error:
+        shipmentResult.success
+          ? fulfillmentResult.success
+            ? null
+            : fulfillmentResult.error || "Shopify fulfillment failed"
+          : shipmentResult.error || "Shipment creation failed"
     });
 
     console.log("💾 Shipment stored with completed status");
+    console.log("🧾 Stored record summary:");
+    console.log(
+      JSON.stringify(
+        {
+          order_id: storedRecord.order_id,
+          order_name: storedRecord.order_name,
+          status: storedRecord.status,
+          selected_carrier: storedRecord.selected_carrier,
+          actual_carrier: storedRecord.actual_carrier,
+          tracking_number: storedRecord.tracking_number,
+          fulfillment_success: storedRecord.fulfillment_success
+        },
+        null,
+        2
+      )
+    );
 
     res.sendStatus(200);
   } catch (err) {

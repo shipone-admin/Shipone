@@ -1,8 +1,3 @@
-// ================================
-// SHIPONE DATABASE
-// POSTGRES VERSION
-// ================================
-
 const { Pool } = require("pg");
 
 if (!process.env.DATABASE_URL) {
@@ -12,9 +7,7 @@ if (!process.env.DATABASE_URL) {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL
-    ? {
-        rejectUnauthorized: false
-      }
+    ? { rejectUnauthorized: false }
     : false
 });
 
@@ -76,7 +69,6 @@ async function initDatabase() {
 }
 
 module.exports = {
-  pool,
   query,
   initDatabase
 };

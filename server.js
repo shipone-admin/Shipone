@@ -16,7 +16,6 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-
 // ================================
 // ROOT TEST
 // ================================
@@ -24,14 +23,11 @@ app.get("/", (req, res) => {
   res.send("ShipOne backend is running");
 });
 
-
 // ================================
 // SHOPIFY OAUTH CALLBACK
 // ================================
 app.get("/oauth/callback", async (req, res) => {
-
   try {
-
     const { code, shop } = req.query;
 
     console.log("SHOP:", shop);
@@ -56,26 +52,19 @@ app.get("/oauth/callback", async (req, res) => {
     console.log(accessToken);
 
     res.send("TOKEN GENERATED. CHECK RAILWAY LOGS.");
-
   } catch (error) {
-
     console.error("❌ OAuth error:");
     console.error(error.response?.data || error.message);
 
     res.send("OAuth failed");
-
   }
-
 });
-
 
 // ================================
 // SHOPIFY ORDER WEBHOOK
 // ================================
 app.post("/webhooks/orders-create", async (req, res) => {
-
   try {
-
     const order = req.body;
 
     console.log("📦 NEW ORDER:", order.name);
@@ -89,8 +78,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
 
     let shiponePreference = "SMART";
 
-    if (order.note_attributes) {
-
+    if (Array.isArray(order.note_attributes)) {
       const attr = order.note_attributes.find(
         (a) => a.name === "shipone_delivery"
       );
@@ -98,7 +86,6 @@ app.post("/webhooks/orders-create", async (req, res) => {
       if (attr && attr.value) {
         shiponePreference = attr.value;
       }
-
     }
 
     if (shiponePreference === "FASTEST") shiponePreference = "FAST";
@@ -118,40 +105,60 @@ app.post("/webhooks/orders-create", async (req, res) => {
 
     const shipmentResult = await createShipment(order);
 
-    if (shipmentResult.success && shipmentResult.data) {
+    let fulfillmentResult = {
+      success: false,
+      skipped: true,
+      reason: "Shipment was not created"
+    };
 
-      await fulfillShopifyOrder(
+    if (shipmentResult.success && shipmentResult.data) {
+      fulfillmentResult = await fulfillShopifyOrder(
         order.id,
         shipmentResult.data.trackingNumber,
         shipmentResult.data.trackingUrl
       );
 
-      console.log("📦 Shopify order fulfilled");
-
+      if (fulfillmentResult.success) {
+        console.log("✅ Shopify fulfillment completed");
+      } else {
+        console.log("❌ Shopify fulfillment failed");
+        console.log(
+          JSON.stringify(
+            {
+              step: fulfillmentResult.step,
+              status: fulfillmentResult.status,
+              error: fulfillmentResult.error
+            },
+            null,
+            2
+          )
+        );
+      }
+    } else {
+      console.log("❌ Shipment creation failed, skipping Shopify fulfillment");
     }
 
     await saveShipment({
       order_id: order.id,
       order_name: order.name,
-      carrier: selectedOption.carrier,
-      service: selectedOption.name,
-      postnord: shipmentResult,
+      carrier: shipmentResult.carrier || selectedOption?.carrier || null,
+      service: selectedOption?.name || null,
+      shipone_choice: shiponePreference,
+      shipment_success: shipmentResult.success,
+      shipment_result: shipmentResult,
+      fulfillment_success: fulfillmentResult.success || false,
+      fulfillment_result: fulfillmentResult,
       created_at: new Date().toISOString()
     });
 
     res.sendStatus(200);
-
   } catch (err) {
-
     console.error("❌ SHIPMENT ERROR:");
     console.error(err.response?.data || err.message);
 
     res.sendStatus(200);
-
   }
-
 });
-
 
 app.listen(PORT, () => {
   console.log(`🚀 ShipOne running on port ${PORT}`);

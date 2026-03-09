@@ -1,6 +1,6 @@
 // ================================
-// SHIPONE BACKEND (CLEAN VERSION)
-// CARRIER-AWARE FLOW
+// SHIPONE BACKEND
+// IDEMPOTENCY VERSION
 // ================================
 
 const express = require("express");
@@ -10,7 +10,11 @@ const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
 const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
 const { collectRates } = require("./core/rateCollector");
-const { saveShipment } = require("./services/shipmentStore");
+const {
+  beginOrderProcessing,
+  completeOrderProcessing,
+  failOrderProcessing
+} = require("./services/shipmentStore");
 
 const app = express();
 app.use(express.json());
@@ -65,13 +69,42 @@ app.get("/oauth/callback", async (req, res) => {
 // SHOPIFY ORDER WEBHOOK
 // ================================
 app.post("/webhooks/orders-create", async (req, res) => {
-  try {
-    const order = req.body;
+  const order = req.body;
 
+  try {
     console.log("📦 NEW ORDER:", order.name);
+
+    if (!order || !order.id) {
+      console.log("❌ Missing order id");
+      return res.sendStatus(200);
+    }
+
+    const processingState = beginOrderProcessing(order);
+
+    if (!processingState.started) {
+      if (processingState.reason === "already_processing") {
+        console.log("🛑 Duplicate webhook blocked: order already processing");
+        console.log("Order ID:", order.id);
+        return res.sendStatus(200);
+      }
+
+      if (processingState.reason === "already_completed") {
+        console.log("🛑 Duplicate webhook blocked: order already completed");
+        console.log("Order ID:", order.id);
+        return res.sendStatus(200);
+      }
+    }
+
+    console.log("🔒 Idempotency lock created for order:", order.id);
 
     if (!order.shipping_address) {
       console.log("❌ Missing shipping address");
+
+      failOrderProcessing(order.id, {
+        order_name: order.name,
+        error: "Missing shipping address"
+      });
+
       return res.sendStatus(200);
     }
 
@@ -103,14 +136,10 @@ app.post("/webhooks/orders-create", async (req, res) => {
     if (!selectedOption) {
       console.log("❌ No shipping option could be selected");
 
-      await saveShipment({
-        order_id: order.id,
+      failOrderProcessing(order.id, {
         order_name: order.name,
         shipone_choice: shiponePreference,
-        shipment_success: false,
-        fulfillment_success: false,
-        error: "No shipping option selected",
-        created_at: new Date().toISOString()
+        error: "No shipping option selected"
       });
 
       return res.sendStatus(200);
@@ -156,8 +185,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
       console.log("❌ Shipment creation failed, skipping Shopify fulfillment");
     }
 
-    await saveShipment({
-      order_id: order.id,
+    completeOrderProcessing(order.id, {
       order_name: order.name,
       shipone_choice: shiponePreference,
       selected_option: selectedOption,
@@ -170,13 +198,23 @@ app.post("/webhooks/orders-create", async (req, res) => {
       shipment_result: shipmentResult,
       fulfillment_success: fulfillmentResult.success || false,
       fulfillment_result: fulfillmentResult,
-      created_at: new Date().toISOString()
+      completed_at: new Date().toISOString()
     });
+
+    console.log("💾 Shipment stored with completed status");
 
     res.sendStatus(200);
   } catch (err) {
     console.error("❌ SHIPMENT ERROR:");
     console.error(err.response?.data || err.message);
+
+    if (order && order.id) {
+      failOrderProcessing(order.id, {
+        order_name: order.name,
+        error: err.response?.data || err.message,
+        failed_at: new Date().toISOString()
+      });
+    }
 
     res.sendStatus(200);
   }

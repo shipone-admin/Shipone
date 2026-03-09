@@ -1,11 +1,12 @@
 // ================================
 // SHIPONE BACKEND
-// STRUCTURED STORE + READ ENDPOINTS
+// POSTGRES VERSION
 // ================================
 
 const express = require("express");
 const axios = require("axios");
 
+const { initDatabase } = require("./services/db");
 const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
 const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
@@ -24,20 +25,14 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-// ================================
-// ROOT TEST
-// ================================
 app.get("/", (req, res) => {
   res.send("ShipOne backend is running");
 });
 
-// ================================
-// READ ALL SHIPMENTS
-// ================================
-app.get("/shipments", (req, res) => {
+app.get("/shipments", async (req, res) => {
   try {
     const limit = Number(req.query.limit || 20);
-    const shipments = getRecentShipments(limit);
+    const shipments = await getRecentShipments(limit);
 
     res.status(200).json({
       success: true,
@@ -55,13 +50,10 @@ app.get("/shipments", (req, res) => {
   }
 });
 
-// ================================
-// READ ONE SHIPMENT BY ORDER ID
-// ================================
-app.get("/shipments/:orderId", (req, res) => {
+app.get("/shipments/:orderId", async (req, res) => {
   try {
     const { orderId } = req.params;
-    const shipment = findShipmentByOrderId(orderId);
+    const shipment = await findShipmentByOrderId(orderId);
 
     if (!shipment) {
       return res.status(404).json({
@@ -85,12 +77,9 @@ app.get("/shipments/:orderId", (req, res) => {
   }
 });
 
-// ================================
-// DEBUG READ RAW SHIPMENTS FILE DATA
-// ================================
-app.get("/shipments-debug", (req, res) => {
+app.get("/shipments-debug", async (req, res) => {
   try {
-    const shipments = readShipments();
+    const shipments = await readShipments();
 
     res.status(200).json({
       success: true,
@@ -108,9 +97,6 @@ app.get("/shipments-debug", (req, res) => {
   }
 });
 
-// ================================
-// SHOPIFY OAUTH CALLBACK
-// ================================
 app.get("/oauth/callback", async (req, res) => {
   try {
     const { code, shop } = req.query;
@@ -145,9 +131,6 @@ app.get("/oauth/callback", async (req, res) => {
   }
 });
 
-// ================================
-// SHOPIFY ORDER WEBHOOK
-// ================================
 app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
 
@@ -159,7 +142,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    const processingState = beginOrderProcessing(order);
+    const processingState = await beginOrderProcessing(order);
 
     if (!processingState.started) {
       if (processingState.reason === "already_processing") {
@@ -180,7 +163,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
     if (!order.shipping_address) {
       console.log("❌ Missing shipping address");
 
-      failOrderProcessing(order.id, {
+      await failOrderProcessing(order.id, {
         order_name: order.name,
         error: "Missing shipping address"
       });
@@ -216,7 +199,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
     if (!selectedOption) {
       console.log("❌ No shipping option could be selected");
 
-      failOrderProcessing(order.id, {
+      await failOrderProcessing(order.id, {
         order_name: order.name,
         shipone_choice: shiponePreference,
         error: "No shipping option selected"
@@ -272,7 +255,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
       console.log("❌ Shipment creation failed, skipping Shopify fulfillment");
     }
 
-    const storedRecord = saveShipmentOutcome(order, {
+    const storedRecord = await saveShipmentOutcome(order, {
       shipone_choice: shiponePreference,
       selected_option: selectedOption,
       selected_carrier: selectedOption.carrier || null,
@@ -286,11 +269,12 @@ app.post("/webhooks/orders-create", async (req, res) => {
       fulfillment_success: fulfillmentResult.success || false,
       shipment_result: shipmentResult,
       fulfillment_result: fulfillmentResult,
-      error: shipmentResult.success
-        ? fulfillmentResult.success
-          ? null
-          : fulfillmentResult.error || "Shopify fulfillment failed"
-        : shipmentResult.error || "Shipment creation failed"
+      error:
+        shipmentResult.success
+          ? fulfillmentResult.success
+            ? null
+            : fulfillmentResult.error || "Shopify fulfillment failed"
+          : shipmentResult.error || "Shipment creation failed"
     });
 
     console.log("💾 Shipment stored with completed status");
@@ -317,7 +301,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
     console.error(err.response?.data || err.message);
 
     if (order && order.id) {
-      failOrderProcessing(order.id, {
+      await failOrderProcessing(order.id, {
         order_name: order.name,
         error: err.response?.data || err.message,
         failed_at: new Date().toISOString()
@@ -328,6 +312,18 @@ app.post("/webhooks/orders-create", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 ShipOne running on port ${PORT}`);
-});
+async function startServer() {
+  try {
+    await initDatabase();
+
+    app.listen(PORT, () => {
+      console.log(`🚀 ShipOne running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("❌ Failed to start server:");
+    console.error(error.message);
+    process.exit(1);
+  }
+}
+
+startServer();

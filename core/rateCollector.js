@@ -1,6 +1,7 @@
 // ================================
 // SHIPONE RATE COLLECTOR
 // CARRIER-CONFIG VERSION
+// MATCHED TO CURRENT MOCK EXPORTS
 // ================================
 
 const {
@@ -8,25 +9,42 @@ const {
   getEnabledRateCarriers
 } = require("../services/carrierConfig");
 
-const postnordRates = require("../carriers/postnord.mock");
-const dhlRates = require("../carriers/dhl.mock");
-const budbeeRates = require("../carriers/budbee.mock");
+const { getRates: getPostNordRates } = require("../carriers/postnord.mock");
+
+async function loadDHLRates(order) {
+  const dhlModule = await import("../carriers/dhl.mock.js");
+  return await dhlModule.default.getRates(order);
+}
+
+async function loadBudbeeRates(order) {
+  const budbeeModule = await import("../carriers/budbee.mock.js");
+  return await budbeeModule.default.getRates(order);
+}
+
+function pushRates(allRates, incomingRates) {
+  if (Array.isArray(incomingRates)) {
+    allRates.push(...incomingRates);
+    return;
+  }
+
+  if (incomingRates) {
+    allRates.push(incomingRates);
+  }
+}
 
 async function collectRates(order) {
   const allRates = [];
   const enabledRateCarriers = getEnabledRateCarriers();
 
-  console.log("📦 Enabled rate carriers:", enabledRateCarriers.join(", ") || "none");
+  console.log(
+    "📦 Enabled rate carriers:",
+    enabledRateCarriers.length ? enabledRateCarriers.join(", ") : "none"
+  );
 
   if (canUseCarrierForRates("postnord")) {
     try {
-      const postnord = await postnordRates(order);
-
-      if (Array.isArray(postnord)) {
-        allRates.push(...postnord);
-      } else if (postnord) {
-        allRates.push(postnord);
-      }
+      const postnordRates = getPostNordRates(order);
+      pushRates(allRates, postnordRates);
     } catch (error) {
       console.log("❌ PostNord rates failed");
       console.log("Reason:", error.message);
@@ -37,13 +55,8 @@ async function collectRates(order) {
 
   if (canUseCarrierForRates("dhl")) {
     try {
-      const dhl = await dhlRates(order);
-
-      if (Array.isArray(dhl)) {
-        allRates.push(...dhl);
-      } else if (dhl) {
-        allRates.push(dhl);
-      }
+      const dhlRates = await loadDHLRates(order);
+      pushRates(allRates, dhlRates);
     } catch (error) {
       console.log("❌ DHL rates failed");
       console.log("Reason:", error.message);
@@ -54,13 +67,8 @@ async function collectRates(order) {
 
   if (canUseCarrierForRates("budbee")) {
     try {
-      const budbee = await budbeeRates(order);
-
-      if (Array.isArray(budbee)) {
-        allRates.push(...budbee);
-      } else if (budbee) {
-        allRates.push(budbee);
-      }
+      const budbeeRates = await loadBudbeeRates(order);
+      pushRates(allRates, budbeeRates);
     } catch (error) {
       console.log("❌ Budbee rates failed");
       console.log("Reason:", error.message);

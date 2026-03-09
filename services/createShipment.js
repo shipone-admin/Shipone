@@ -1,12 +1,9 @@
 // ================================
 // SHIPONE UNIVERSAL SHIPMENT HANDLER
 // ================================
-const { fulfillShopifyOrder } = require("./shopifyfulfillment");
 
-const { createPostNordShipment } = require("../postnordShipment"); 
+const { createPostNordShipment } = require("../postnordShipment");
 const { createDHLShipment } = require("../carriers/dhl.service");
-
-
 
 async function createShipment(order) {
   console.log("🚚 ShipOne creating shipment...");
@@ -16,26 +13,16 @@ async function createShipment(order) {
   // ---------------------------
   try {
     console.log("📡 Trying PostNord...");
-   const result = await createPostNordShipment(order);
 
-console.log("✅ PostNord shipment created");
+    const result = await createPostNordShipment(order);
 
-// Shopify fulfillment
-await fulfillShopifyOrder(
-  order.id,
-  result.trackingNumber,
-  result.trackingUrl
-);
+    console.log("✅ PostNord shipment created");
 
-console.log("📦 Shopify order fulfilled");
-
-return {
-  carrier: "postnord",
-  success: true,
-  data: result
-};
-
-
+    return {
+      carrier: "postnord",
+      success: true,
+      data: result
+    };
   } catch (error) {
     console.log("❌ PostNord failed — activating fallback");
     console.log("Reason:", error.message);
@@ -46,6 +33,7 @@ return {
   // ---------------------------
   try {
     console.log("📡 Trying DHL fallback...");
+
     const dhlResult = await createDHLShipment(order);
 
     console.log("✅ DHL fallback shipment created");
@@ -56,9 +44,9 @@ return {
       success: true,
       data: dhlResult
     };
-
   } catch (fallbackError) {
     console.log("❌ DHL also failed");
+    console.log("Reason:", fallbackError.message);
 
     return {
       success: false,

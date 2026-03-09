@@ -1,10 +1,15 @@
 // ================================
 // SHIPONE UNIVERSAL SHIPMENT HANDLER
-// CARRIER-AWARE VERSION
+// CARRIER-CONFIG VERSION
 // ================================
 
 const { createPostNordShipment } = require("../postnordShipment");
 const { createDHLShipment } = require("../carriers/dhl.service");
+
+const {
+  canUseCarrierForShipment,
+  getEnabledShipmentCarriers
+} = require("./carrierConfig");
 
 async function tryPostNord(order) {
   console.log("📡 Trying PostNord...");
@@ -40,12 +45,11 @@ async function tryBudbee(order) {
   throw new Error("Budbee shipment service is not implemented yet");
 }
 
-function buildFallbackChain(preferredCarrier) {
-  const allCarriers = ["postnord", "dhl", "budbee"];
-  return allCarriers.filter((carrier) => carrier !== preferredCarrier);
-}
-
 async function runCarrierAttempt(carrier, order) {
+  if (!canUseCarrierForShipment(carrier)) {
+    throw new Error(`Carrier disabled for shipment: ${carrier}`);
+  }
+
   if (carrier === "postnord") {
     return await tryPostNord(order);
   }
@@ -59,6 +63,14 @@ async function runCarrierAttempt(carrier, order) {
   }
 
   throw new Error(`Unsupported carrier: ${carrier}`);
+}
+
+function buildFallbackChain(preferredCarrier) {
+  const enabledShipmentCarriers = getEnabledShipmentCarriers();
+
+  return enabledShipmentCarriers.filter(
+    (carrier) => carrier !== preferredCarrier
+  );
 }
 
 async function createShipment(order, selectedOption) {
@@ -78,11 +90,9 @@ async function createShipment(order, selectedOption) {
 
   const fallbackChain = buildFallbackChain(preferredCarrier);
 
-  console.log("🛟 Fallback chain:", fallbackChain.join(" -> "));
+  console.log("🛟 Fallback chain:", fallbackChain.join(" -> ") || "none");
 
-  // ---------------------------
-  // 1) TRY SELECTED CARRIER FIRST
-  // ---------------------------
+  // 1) Try preferred carrier first
   try {
     const preferredResult = await runCarrierAttempt(preferredCarrier, order);
 
@@ -97,9 +107,7 @@ async function createShipment(order, selectedOption) {
     console.log("Reason:", error.message);
   }
 
-  // ---------------------------
-  // 2) FALLBACK CHAIN
-  // ---------------------------
+  // 2) Try enabled fallback carriers only
   for (const fallbackCarrier of fallbackChain) {
     try {
       console.log(`📡 Trying fallback carrier: ${fallbackCarrier}`);
@@ -123,7 +131,7 @@ async function createShipment(order, selectedOption) {
     success: false,
     selected_carrier: preferredCarrier,
     selected_service: selectedOption.name || null,
-    error: "All carriers failed"
+    error: "All enabled carriers failed"
   };
 }
 

@@ -1,6 +1,6 @@
 // ================================
 // SHIPONE BACKEND
-// STRUCTURED STORE VERSION
+// STRUCTURED STORE + READ ENDPOINTS
 // ================================
 
 const express = require("express");
@@ -13,7 +13,10 @@ const { collectRates } = require("./core/rateCollector");
 const {
   beginOrderProcessing,
   failOrderProcessing,
-  saveShipmentOutcome
+  saveShipmentOutcome,
+  readShipments,
+  findShipmentByOrderId,
+  getRecentShipments
 } = require("./services/shipmentStore");
 
 const app = express();
@@ -26,6 +29,83 @@ const PORT = process.env.PORT || 8080;
 // ================================
 app.get("/", (req, res) => {
   res.send("ShipOne backend is running");
+});
+
+// ================================
+// READ ALL SHIPMENTS
+// ================================
+app.get("/shipments", (req, res) => {
+  try {
+    const limit = Number(req.query.limit || 20);
+    const shipments = getRecentShipments(limit);
+
+    res.status(200).json({
+      success: true,
+      total: shipments.length,
+      shipments
+    });
+  } catch (error) {
+    console.error("❌ Failed to read shipments:");
+    console.error(error.message);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to read shipments"
+    });
+  }
+});
+
+// ================================
+// READ ONE SHIPMENT BY ORDER ID
+// ================================
+app.get("/shipments/:orderId", (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const shipment = findShipmentByOrderId(orderId);
+
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        error: "Shipment not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      shipment
+    });
+  } catch (error) {
+    console.error("❌ Failed to read shipment by order id:");
+    console.error(error.message);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to read shipment"
+    });
+  }
+});
+
+// ================================
+// DEBUG READ RAW SHIPMENTS FILE DATA
+// ================================
+app.get("/shipments-debug", (req, res) => {
+  try {
+    const shipments = readShipments();
+
+    res.status(200).json({
+      success: true,
+      total: shipments.length,
+      shipments
+    });
+  } catch (error) {
+    console.error("❌ Failed to debug shipments:");
+    console.error(error.message);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to debug shipments"
+    });
+  }
 });
 
 // ================================
@@ -206,12 +286,11 @@ app.post("/webhooks/orders-create", async (req, res) => {
       fulfillment_success: fulfillmentResult.success || false,
       shipment_result: shipmentResult,
       fulfillment_result: fulfillmentResult,
-      error:
-        shipmentResult.success
-          ? fulfillmentResult.success
-            ? null
-            : fulfillmentResult.error || "Shopify fulfillment failed"
-          : shipmentResult.error || "Shipment creation failed"
+      error: shipmentResult.success
+        ? fulfillmentResult.success
+          ? null
+          : fulfillmentResult.error || "Shopify fulfillment failed"
+        : shipmentResult.error || "Shipment creation failed"
     });
 
     console.log("💾 Shipment stored with completed status");

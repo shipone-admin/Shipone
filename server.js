@@ -1,8 +1,3 @@
-// ================================
-// SHIPONE BACKEND
-// POSTGRES VERSION
-// ================================
-
 const express = require("express");
 const axios = require("axios");
 
@@ -34,7 +29,7 @@ app.get("/shipments", async (req, res) => {
     const limit = Number(req.query.limit || 20);
     const shipments = await getRecentShipments(limit);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       total: shipments.length,
       shipments
@@ -43,7 +38,7 @@ app.get("/shipments", async (req, res) => {
     console.error("❌ Failed to read shipments:");
     console.error(error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Failed to read shipments"
     });
@@ -62,7 +57,7 @@ app.get("/shipments/:orderId", async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       shipment
     });
@@ -70,7 +65,7 @@ app.get("/shipments/:orderId", async (req, res) => {
     console.error("❌ Failed to read shipment by order id:");
     console.error(error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Failed to read shipment"
     });
@@ -81,7 +76,7 @@ app.get("/shipments-debug", async (req, res) => {
   try {
     const shipments = await readShipments();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       total: shipments.length,
       shipments
@@ -90,7 +85,7 @@ app.get("/shipments-debug", async (req, res) => {
     console.error("❌ Failed to debug shipments:");
     console.error(error.message);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Failed to debug shipments"
     });
@@ -122,12 +117,12 @@ app.get("/oauth/callback", async (req, res) => {
     console.log("✅ SHOPIFY ACCESS TOKEN:");
     console.log(accessToken);
 
-    res.send("TOKEN GENERATED. CHECK RAILWAY LOGS.");
+    return res.send("TOKEN GENERATED. CHECK RAILWAY LOGS.");
   } catch (error) {
     console.error("❌ OAuth error:");
     console.error(error.response?.data || error.message);
 
-    res.send("OAuth failed");
+    return res.send("OAuth failed");
   }
 });
 
@@ -295,7 +290,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
       )
     );
 
-    res.sendStatus(200);
+    return res.sendStatus(200);
   } catch (err) {
     console.error("❌ SHIPMENT ERROR:");
     console.error(err.response?.data || err.message);
@@ -308,7 +303,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
       });
     }
 
-    res.sendStatus(200);
+    return res.sendStatus(200);
   }
 });
 

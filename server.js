@@ -1,7 +1,7 @@
 // ================================
 // SHIPONE BACKEND
-// HMAC + IDEMPOTENCY VERSION
-// JSON-VERIFY RAW BODY STRATEGY
+// IDEMPOTENCY VERSION
+// STABLE ROLLBACK (NO HMAC)
 // ================================
 
 const express = require("express");
@@ -16,23 +16,11 @@ const {
   completeOrderProcessing,
   failOrderProcessing
 } = require("./services/shipmentStore");
-const { verifyShopifyWebhook } = require("./services/shopifyWebhookVerify");
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+app.use(express.json());
 
-// ================================
-// RAW BODY CAPTURE FOR SHOPIFY WEBHOOKS
-// ================================
-app.use(
-  express.json({
-    verify: (req, res, buf) => {
-      if (req.originalUrl === "/webhooks/orders-create") {
-        req.rawBody = Buffer.from(buf);
-      }
-    }
-  })
-);
+const PORT = process.env.PORT || 8080;
 
 // ================================
 // ROOT TEST
@@ -80,43 +68,11 @@ app.get("/oauth/callback", async (req, res) => {
 
 // ================================
 // SHOPIFY ORDER WEBHOOK
-// HMAC VERIFIED
 // ================================
 app.post("/webhooks/orders-create", async (req, res) => {
-  let order = null;
+  const order = req.body;
 
   try {
-    const hmacHeader = req.get("X-Shopify-Hmac-Sha256");
-    const webhookTopic = req.get("X-Shopify-Topic");
-    const webhookShop = req.get("X-Shopify-Shop-Domain");
-    const webhookId = req.get("X-Shopify-Webhook-Id");
-    const webhookTriggeredAt = req.get("X-Shopify-Triggered-At");
-
-    const secret =
-      process.env.SHOPIFY_API_SECRET || process.env.SHOPIFY_CLIENT_SECRET;
-
-    const isValid = verifyShopifyWebhook(req.rawBody, hmacHeader, secret);
-
-    if (!isValid) {
-      console.log("❌ Invalid Shopify webhook HMAC");
-      console.log("Topic:", webhookTopic);
-      console.log("Shop:", webhookShop);
-      console.log("Webhook ID:", webhookId || "N/A");
-      console.log("Has raw body:", Boolean(req.rawBody));
-      console.log("Has HMAC header:", Boolean(hmacHeader));
-      console.log("Using secret:", secret ? "yes" : "no");
-
-      return res.sendStatus(401);
-    }
-
-    console.log("✅ Shopify webhook verified");
-    console.log("Topic:", webhookTopic);
-    console.log("Shop:", webhookShop);
-    console.log("Webhook ID:", webhookId || "N/A");
-    console.log("Triggered At:", webhookTriggeredAt || "N/A");
-
-    order = req.body;
-
     console.log("📦 NEW ORDER:", order.name);
 
     if (!order || !order.id) {
@@ -243,15 +199,12 @@ app.post("/webhooks/orders-create", async (req, res) => {
       shipment_result: shipmentResult,
       fulfillment_success: fulfillmentResult.success || false,
       fulfillment_result: fulfillmentResult,
-      webhook_topic: webhookTopic || null,
-      webhook_shop: webhookShop || null,
-      webhook_id: webhookId || null,
       completed_at: new Date().toISOString()
     });
 
     console.log("💾 Shipment stored with completed status");
 
-    return res.sendStatus(200);
+    res.sendStatus(200);
   } catch (err) {
     console.error("❌ SHIPMENT ERROR:");
     console.error(err.response?.data || err.message);
@@ -264,7 +217,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
       });
     }
 
-    return res.sendStatus(200);
+    res.sendStatus(200);
   }
 });
 

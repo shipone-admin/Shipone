@@ -135,6 +135,7 @@ async function syncPostNordTrackingByOrderId(orderId) {
 }
 
 module.exports = {
+  syncPostNordTrackingForShipment,
   syncPostNordTrackingByTrackingNumber,
   syncPostNordTrackingByOrderId
 };

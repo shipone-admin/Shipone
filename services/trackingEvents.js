@@ -28,7 +28,7 @@ function createEvent({
   };
 }
 
-function buildTrackingEvents(shipment) {
+function buildInternalTrackingEvents(shipment) {
   const events = [];
 
   if (!shipment) {
@@ -135,13 +135,39 @@ function buildTrackingEvents(shipment) {
     );
   }
 
+  return events.filter(Boolean);
+}
+
+function normalizeExternalEvents(events, fallbackSource = "carrier") {
+  if (!Array.isArray(events)) {
+    return [];
+  }
+
   return events
     .filter(Boolean)
-    .sort((a, b) => {
-      const aTime = a.occurredAt ? new Date(a.occurredAt).getTime() : 0;
-      const bTime = b.occurredAt ? new Date(b.occurredAt).getTime() : 0;
-      return aTime - bTime;
-    });
+    .map((event, index) => ({
+      code: event.code || `${fallbackSource}_event_${index + 1}`,
+      title: event.title || "Tracking-händelse",
+      description: event.description || "Extern tracking-händelse.",
+      occurredAt: formatDateValue(event.occurredAt),
+      status: event.status || "done",
+      source: event.source || fallbackSource
+    }));
+}
+
+function sortEventsAscending(events) {
+  return [...events].sort((a, b) => {
+    const aTime = a.occurredAt ? new Date(a.occurredAt).getTime() : 0;
+    const bTime = b.occurredAt ? new Date(b.occurredAt).getTime() : 0;
+    return aTime - bTime;
+  });
+}
+
+function buildTrackingEvents({ shipment, externalEvents = [] }) {
+  const internalEvents = buildInternalTrackingEvents(shipment);
+  const normalizedExternalEvents = normalizeExternalEvents(externalEvents, "postnord");
+
+  return sortEventsAscending([...internalEvents, ...normalizedExternalEvents]);
 }
 
 module.exports = {

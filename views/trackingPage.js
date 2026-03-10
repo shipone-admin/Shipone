@@ -104,6 +104,7 @@ function getEventStateClass(status) {
 function getEventSourceLabel(source) {
   if (source === "shopify") return "Shopify";
   if (source === "carrier") return "Transportör";
+  if (source === "postnord") return "PostNord";
   return "ShipOne";
 }
 
@@ -145,9 +146,42 @@ function renderEvents(events) {
   `;
 }
 
+function renderCarrierStatusMessage(carrierTracking) {
+  if (!carrierTracking) {
+    return "";
+  }
+
+  if (carrierTracking.success && carrierTracking.statusText) {
+    return `
+      <div class="carrier-box carrier-success">
+        Live PostNord-status: ${escapeHtml(carrierTracking.statusText)}
+      </div>
+    `;
+  }
+
+  if (carrierTracking.skipped && carrierTracking.reason) {
+    return `
+      <div class="carrier-box carrier-warning">
+        Live PostNord-tracking används inte just nu: ${escapeHtml(carrierTracking.reason)}
+      </div>
+    `;
+  }
+
+  if (!carrierTracking.success && carrierTracking.reason) {
+    return `
+      <div class="carrier-box carrier-warning">
+        Kunde inte hämta live PostNord-tracking just nu: ${escapeHtml(carrierTracking.reason)}
+      </div>
+    `;
+  }
+
+  return "";
+}
+
 function renderTrackingPage(data) {
   const shipment = data?.shipment || {};
   const events = Array.isArray(data?.events) ? data.events : [];
+  const carrierTracking = data?.carrierTracking || null;
 
   const orderName = escapeHtml(shipment.order_name || "-");
   const carrier = escapeHtml(formatCarrierName(shipment.actual_carrier));
@@ -383,7 +417,7 @@ function renderTrackingPage(data) {
           color: var(--brand-dark);
           border-radius: 16px;
           padding: 16px 18px;
-          margin-bottom: 24px;
+          margin-bottom: 18px;
         }
 
         .status-dot {
@@ -403,6 +437,27 @@ function renderTrackingPage(data) {
         .status-text span {
           color: var(--muted);
           font-size: 14px;
+        }
+
+        .carrier-box {
+          margin-bottom: 24px;
+          border-radius: 14px;
+          padding: 14px 16px;
+          font-size: 14px;
+          line-height: 1.6;
+          font-weight: 700;
+        }
+
+        .carrier-success {
+          background: var(--success-soft);
+          border: 1px solid #bbf7d0;
+          color: var(--success);
+        }
+
+        .carrier-warning {
+          background: var(--warning-soft);
+          border: 1px solid #fed7aa;
+          color: var(--warning);
         }
 
         .main-grid {
@@ -708,6 +763,8 @@ function renderTrackingPage(data) {
                 </div>
               </div>
 
+              ${renderCarrierStatusMessage(carrierTracking)}
+
               <div class="main-grid">
                 <div class="section-card">
                   <h2 class="section-title">Försändelseinformation</h2>
@@ -788,7 +845,7 @@ function renderTrackingPage(data) {
               </div>
 
               <div class="footer">
-                ShipOne visar nu strukturerade tracking-händelser från intern shipment-data och är redo för nästa steg med live carrier-events.
+                ShipOne visar nu interna tracking-händelser tillsammans med live PostNord-händelser när de finns tillgängliga.
               </div>
             </div>
           </div>

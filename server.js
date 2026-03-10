@@ -6,6 +6,7 @@ const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
 const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
 const { collectRates } = require("./core/rateCollector");
+const { buildTrackingEvents } = require("./services/trackingEvents");
 const {
   beginOrderProcessing,
   failOrderProcessing,
@@ -112,8 +113,14 @@ app.get("/track/:trackingNumber", async (req, res) => {
     }
 
     const shipment = result.rows[0];
+    const events = buildTrackingEvents(shipment);
 
-    return res.status(200).send(renderTrackingPage(shipment));
+    return res.status(200).send(
+      renderTrackingPage({
+        shipment,
+        events
+      })
+    );
   } catch (error) {
     console.error("❌ Tracking lookup failed:");
     console.error(error.message);

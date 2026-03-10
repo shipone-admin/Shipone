@@ -13,6 +13,28 @@ function normalizeLimit(limit) {
   return Math.max(1, Math.min(parsed, 100));
 }
 
+function normalizeMaxAgeDays(value) {
+  const parsed = Number(value);
+
+  if (Number.isNaN(parsed)) {
+    return 30;
+  }
+
+  return Math.max(1, Math.min(parsed, 365));
+}
+
+function normalizeDate(value) {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
 function isDeliveredStatus(shipment) {
   const carrierStatus = String(shipment?.carrier_status_text || "")
     .trim()
@@ -34,6 +56,56 @@ function isDeliveredStatus(shipment) {
   }
 
   return false;
+}
+
+function isFailedShipment(shipment) {
+  const shipmentStatus = String(shipment?.status || "")
+    .trim()
+    .toLowerCase();
+  const carrierStatus = String(shipment?.carrier_status_text || "")
+    .trim()
+    .toLowerCase();
+
+  if (shipmentStatus === "failed") {
+    return true;
+  }
+
+  if (
+    carrierStatus.includes("misslyck") ||
+    carrierStatus.includes("failed") ||
+    carrierStatus.includes("returnerad") ||
+    carrierStatus.includes("retur")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isTooOld(shipment, maxAgeDays) {
+  const createdAt = normalizeDate(shipment?.created_at);
+
+  if (!createdAt) {
+    return false;
+  }
+
+  const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+  const ageMs = Date.now() - createdAt.getTime();
+
+  return ageMs > maxAgeMs;
+}
+
+function isActiveShipment(shipment, maxAgeDays) {
+  if (!shipment) return false;
+  if (!shipment.tracking_number) return false;
+  if (String(shipment.actual_carrier || "").toLowerCase() !== "postnord") {
+    return false;
+  }
+  if (isDeliveredStatus(shipment)) return false;
+  if (isFailedShipment(shipment)) return false;
+  if (isTooOld(shipment, maxAgeDays)) return false;
+
+  return true;
 }
 
 async function getBatchCandidateShipments({
@@ -62,15 +134,32 @@ async function getBatchCandidateShipments({
   return shipments.filter((shipment) => !isDeliveredStatus(shipment));
 }
 
-async function syncPostNordBatch({
+async function getActiveBatchCandidateShipments({
   limit = 20,
-  includeDelivered = false
+  maxAgeDays = 30
 } = {}) {
-  const shipments = await getBatchCandidateShipments({
-    limit,
-    includeDelivered
-  });
+  const safeLimit = normalizeLimit(limit);
+  const safeMaxAgeDays = normalizeMaxAgeDays(maxAgeDays);
 
+  const result = await query(
+    `
+      SELECT *
+      FROM shipments
+      WHERE actual_carrier = 'postnord'
+      ORDER BY created_at DESC, id DESC
+      LIMIT $1
+    `,
+    [safeLimit]
+  );
+
+  const shipments = result.rows || [];
+
+  return shipments.filter((shipment) =>
+    isActiveShipment(shipment, safeMaxAgeDays)
+  );
+}
+
+async function syncShipmentsCollection(shipments) {
   const summary = {
     success: true,
     totalCandidates: shipments.length,
@@ -131,6 +220,47 @@ async function syncPostNordBatch({
   return summary;
 }
 
+async function syncPostNordBatch({
+  limit = 20,
+  includeDelivered = false
+} = {}) {
+  const shipments = await getBatchCandidateShipments({
+    limit,
+    includeDelivered
+  });
+
+  return syncShipmentsCollection(shipments);
+}
+
+async function syncActivePostNordBatch({
+  limit = 20,
+  maxAgeDays = 30
+} = {}) {
+  const safeLimit = normalizeLimit(limit);
+  const safeMaxAgeDays = normalizeMaxAgeDays(maxAgeDays);
+
+  const shipments = await getActiveBatchCandidateShipments({
+    limit: safeLimit,
+    maxAgeDays: safeMaxAgeDays
+  });
+
+  const summary = await syncShipmentsCollection(shipments);
+
+  return {
+    ...summary,
+    mode: "active",
+    filters: {
+      actual_carrier: "postnord",
+      delivered_excluded: true,
+      failed_excluded: true,
+      tracking_number_required: true,
+      maxAgeDays: safeMaxAgeDays,
+      limit: safeLimit
+    }
+  };
+}
+
 module.exports = {
-  syncPostNordBatch
+  syncPostNordBatch,
+  syncActivePostNordBatch
 };

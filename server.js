@@ -11,6 +11,10 @@ const { fetchPostNordTracking } = require("./services/postnordTracking");
 const { getDisplayStatus } = require("./services/trackingStatus");
 const { saveCarrierTrackingSnapshot } = require("./services/trackingSyncStore");
 const {
+  syncPostNordTrackingByTrackingNumber,
+  syncPostNordTrackingByOrderId
+} = require("./services/trackingSyncService");
+const {
   beginOrderProcessing,
   failOrderProcessing,
   saveShipmentOutcome,
@@ -98,6 +102,42 @@ app.get("/shipments-debug", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to debug shipments"
+    });
+  }
+});
+
+app.get("/sync-tracking/:trackingNumber", async (req, res) => {
+  try {
+    const { trackingNumber } = req.params;
+
+    const syncResult = await syncPostNordTrackingByTrackingNumber(trackingNumber);
+
+    return res.status(syncResult.statusCode || 200).json(syncResult);
+  } catch (error) {
+    console.error("❌ Manual tracking sync by tracking number failed:");
+    console.error(error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "Manual tracking sync failed"
+    });
+  }
+});
+
+app.get("/sync-tracking/order/:orderId", async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const syncResult = await syncPostNordTrackingByOrderId(orderId);
+
+    return res.status(syncResult.statusCode || 200).json(syncResult);
+  } catch (error) {
+    console.error("❌ Manual tracking sync by order id failed:");
+    console.error(error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "Manual tracking sync failed"
     });
   }
 });

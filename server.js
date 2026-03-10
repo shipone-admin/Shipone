@@ -19,6 +19,7 @@ const {
   renderTrackingNotFoundPage,
   renderTrackingErrorPage
 } = require("./views/trackingPage");
+const { renderHomePage } = require("./views/homePage");
 
 const app = express();
 app.use(express.json());
@@ -26,7 +27,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 8080;
 
 app.get("/", (req, res) => {
-  res.send("ShipOne backend is running");
+  return res.status(200).send(renderHomePage());
 });
 
 app.get("/shipments", async (req, res) => {

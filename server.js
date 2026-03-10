@@ -18,6 +18,7 @@ const {
   syncPostNordBatch,
   syncActivePostNordBatch
 } = require("./services/trackingBatchSyncService");
+const { runPostNordActiveSyncJob } = require("./services/jobSyncService");
 const {
   beginOrderProcessing,
   failOrderProcessing,
@@ -187,6 +188,32 @@ app.get("/sync-tracking/batch/postnord/active", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Active batch tracking sync failed"
+    });
+  }
+});
+
+app.get("/jobs/sync-postnord-active", async (req, res) => {
+  try {
+    const limit = req.query.limit || 20;
+    const maxAgeDays = req.query.maxAgeDays || 30;
+
+    const result = await runPostNordActiveSyncJob({
+      limit,
+      maxAgeDays
+    });
+
+    return res.status(result.success ? 200 : 500).json(result);
+  } catch (error) {
+    console.error("❌ PostNord active sync job failed:");
+    console.error(error.message);
+
+    return res.status(500).json({
+      success: false,
+      job: {
+        name: "sync-postnord-active",
+        status: "failed"
+      },
+      error: "PostNord active sync job failed"
     });
   }
 });

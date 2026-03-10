@@ -94,7 +94,61 @@ function getStatusMeta(status) {
   };
 }
 
-function renderTrackingPage(shipment) {
+function getEventStateClass(status) {
+  if (status === "done") return "event-done";
+  if (status === "active") return "event-active";
+  if (status === "failed") return "event-failed";
+  return "event-pending";
+}
+
+function getEventSourceLabel(source) {
+  if (source === "shopify") return "Shopify";
+  if (source === "carrier") return "Transportör";
+  return "ShipOne";
+}
+
+function renderEvents(events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return `
+      <div class="empty-events">
+        Inga tracking-händelser finns ännu för denna försändelse.
+      </div>
+    `;
+  }
+
+  return `
+    <ul class="event-list">
+      ${events
+        .map((event) => {
+          const stateClass = getEventStateClass(event.status);
+          const occurredAt = escapeHtml(formatDateSv(event.occurredAt));
+          const title = escapeHtml(event.title || "Händelse");
+          const description = escapeHtml(event.description || "-");
+          const source = escapeHtml(getEventSourceLabel(event.source));
+
+          return `
+            <li class="event-item">
+              <div class="event-dot ${stateClass}"></div>
+              <div class="event-content">
+                <div class="event-top">
+                  <div class="event-title">${title}</div>
+                  <div class="event-source">${source}</div>
+                </div>
+                <div class="event-time">${occurredAt}</div>
+                <div class="event-description">${description}</div>
+              </div>
+            </li>
+          `;
+        })
+        .join("")}
+    </ul>
+  `;
+}
+
+function renderTrackingPage(data) {
+  const shipment = data?.shipment || {};
+  const events = Array.isArray(data?.events) ? data.events : [];
+
   const orderName = escapeHtml(shipment.order_name || "-");
   const carrier = escapeHtml(formatCarrierName(shipment.actual_carrier));
   const status = escapeHtml(formatShipmentStatus(shipment.status));
@@ -168,7 +222,7 @@ function renderTrackingPage(shipment) {
         }
 
         .wrap {
-          max-width: 1040px;
+          max-width: 1120px;
           margin: 0 auto;
         }
 
@@ -462,12 +516,91 @@ function renderTrackingPage(shipment) {
           line-height: 1.6;
         }
 
-        .future-box {
-          margin-top: 18px;
-          padding: 14px 16px;
-          border-radius: 14px;
-          border: 1px dashed #cbd5e1;
+        .events-section {
+          margin-top: 20px;
+        }
+
+        .event-list {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: grid;
+          gap: 14px;
+        }
+
+        .event-item {
+          display: grid;
+          grid-template-columns: 16px 1fr;
+          gap: 14px;
+          align-items: start;
           background: #ffffff;
+          border: 1px solid #e6edf5;
+          border-radius: 16px;
+          padding: 16px;
+        }
+
+        .event-dot {
+          width: 16px;
+          height: 16px;
+          border-radius: 999px;
+          margin-top: 4px;
+        }
+
+        .event-done {
+          background: var(--success);
+        }
+
+        .event-active {
+          background: #2563eb;
+        }
+
+        .event-pending {
+          background: #cbd5e1;
+        }
+
+        .event-failed {
+          background: var(--danger);
+        }
+
+        .event-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 4px;
+        }
+
+        .event-title {
+          font-size: 16px;
+          font-weight: 800;
+        }
+
+        .event-source {
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+
+        .event-time {
+          font-size: 14px;
+          color: var(--muted);
+          margin-bottom: 8px;
+        }
+
+        .event-description {
+          font-size: 14px;
+          line-height: 1.6;
+          color: var(--text);
+        }
+
+        .empty-events {
+          background: #ffffff;
+          border: 1px dashed #cbd5e1;
+          border-radius: 14px;
+          padding: 16px;
           color: var(--muted);
           font-size: 14px;
           line-height: 1.6;
@@ -639,19 +772,14 @@ function renderTrackingPage(shipment) {
                         <div class="timeline-value">${status}</div>
                       </div>
                     </li>
-
-                    <li class="timeline-item">
-                      <div class="timeline-dot"></div>
-                      <div>
-                        <div class="timeline-title">Leveranshändelser</div>
-                        <div class="timeline-value">Redo för framtida event-data från transportören</div>
-                      </div>
-                    </li>
                   </ul>
+                </div>
+              </div>
 
-                  <div class="future-box">
-                    Den här sektionen är förberedd för att senare visa riktiga tracking-events från PostNord och fler carriers.
-                  </div>
+              <div class="events-section">
+                <div class="section-card">
+                  <h2 class="section-title">Leveranshändelser</h2>
+                  ${renderEvents(events)}
                 </div>
               </div>
 
@@ -660,7 +788,7 @@ function renderTrackingPage(shipment) {
               </div>
 
               <div class="footer">
-                ShipOne hjälper butiker att välja rätt fraktalternativ och ge kunder enkel spårning.
+                ShipOne visar nu strukturerade tracking-händelser från intern shipment-data och är redo för nästa steg med live carrier-events.
               </div>
             </div>
           </div>

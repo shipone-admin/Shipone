@@ -28,6 +28,34 @@ function createEvent({
   };
 }
 
+function getShipmentRegisteredAt(shipment) {
+  return shipment?.created_at || null;
+}
+
+function getShipmentCreatedAt(shipment) {
+  return shipment?.created_at || null;
+}
+
+function getFulfillmentCompletedAt(shipment) {
+  return shipment?.completed_at || shipment?.created_at || null;
+}
+
+function getTrackingNumberCreatedAt(shipment) {
+  return shipment?.completed_at || shipment?.created_at || null;
+}
+
+function getShipmentCompletedAt(shipment) {
+  return shipment?.completed_at || shipment?.created_at || null;
+}
+
+function getShipmentProcessingAt(shipment) {
+  return shipment?.created_at || null;
+}
+
+function getShipmentFailedAt(shipment) {
+  return shipment?.failed_at || shipment?.created_at || null;
+}
+
 function buildInternalTrackingEvents(shipment) {
   const events = [];
 
@@ -40,7 +68,7 @@ function buildInternalTrackingEvents(shipment) {
       code: "shipment_registered",
       title: "Shipment registrerat",
       description: "Försändelsen har registrerats i ShipOne.",
-      occurredAt: shipment.created_at,
+      occurredAt: getShipmentRegisteredAt(shipment),
       status: "done",
       source: "shipone"
     })
@@ -52,7 +80,7 @@ function buildInternalTrackingEvents(shipment) {
         code: "shipment_created",
         title: "Fraktsedel skapad",
         description: "Shipment skapades framgångsrikt hos vald transportör.",
-        occurredAt: shipment.created_at,
+        occurredAt: getShipmentCreatedAt(shipment),
         status: "done",
         source: "shipone"
       })
@@ -65,7 +93,7 @@ function buildInternalTrackingEvents(shipment) {
         code: "fulfillment_completed",
         title: "Fulfillment slutförd",
         description: "Ordern har markerats som uppfylld i Shopify.",
-        occurredAt: shipment.completed_at || shipment.updated_at,
+        occurredAt: getFulfillmentCompletedAt(shipment),
         status: "done",
         source: "shopify"
       })
@@ -76,7 +104,7 @@ function buildInternalTrackingEvents(shipment) {
         code: "fulfillment_pending",
         title: "Fulfillment väntar",
         description: "Fulfillment är ännu inte markerad som slutförd.",
-        occurredAt: shipment.updated_at || shipment.created_at,
+        occurredAt: getShipmentProcessingAt(shipment),
         status: "pending",
         source: "shopify"
       })
@@ -89,7 +117,7 @@ function buildInternalTrackingEvents(shipment) {
         code: "tracking_number_created",
         title: "Trackingnummer skapat",
         description: `Trackingnummer ${shipment.tracking_number} är registrerat för försändelsen.`,
-        occurredAt: shipment.updated_at || shipment.created_at,
+        occurredAt: getTrackingNumberCreatedAt(shipment),
         status: "done",
         source: "carrier"
       })
@@ -102,7 +130,7 @@ function buildInternalTrackingEvents(shipment) {
         code: "shipment_completed",
         title: "Shipment klart för spårning",
         description: "Försändelsen är klar och tracking-sidan kan visas för kunden.",
-        occurredAt: shipment.completed_at || shipment.updated_at,
+        occurredAt: getShipmentCompletedAt(shipment),
         status: "done",
         source: "shipone"
       })
@@ -115,7 +143,7 @@ function buildInternalTrackingEvents(shipment) {
         code: "shipment_processing",
         title: "Shipment behandlas",
         description: "Försändelsen behandlas fortfarande i ShipOne-flödet.",
-        occurredAt: shipment.updated_at || shipment.created_at,
+        occurredAt: getShipmentProcessingAt(shipment),
         status: "active",
         source: "shipone"
       })
@@ -128,7 +156,7 @@ function buildInternalTrackingEvents(shipment) {
         code: "shipment_failed",
         title: "Shipment misslyckades",
         description: shipment.error || "Ett fel uppstod i shipment-flödet.",
-        occurredAt: shipment.failed_at || shipment.updated_at || shipment.created_at,
+        occurredAt: getShipmentFailedAt(shipment),
         status: "failed",
         source: "shipone"
       })

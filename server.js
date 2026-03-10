@@ -14,6 +14,7 @@ const {
   syncPostNordTrackingByTrackingNumber,
   syncPostNordTrackingByOrderId
 } = require("./services/trackingSyncService");
+const { syncPostNordBatch } = require("./services/trackingBatchSyncService");
 const {
   beginOrderProcessing,
   failOrderProcessing,
@@ -138,6 +139,29 @@ app.get("/sync-tracking/order/:orderId", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Manual tracking sync failed"
+    });
+  }
+});
+
+app.get("/sync-tracking/batch/postnord", async (req, res) => {
+  try {
+    const limit = req.query.limit || 20;
+    const includeDelivered =
+      String(req.query.includeDelivered || "false").toLowerCase() === "true";
+
+    const result = await syncPostNordBatch({
+      limit,
+      includeDelivered
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("❌ Batch tracking sync failed:");
+    console.error(error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "Batch tracking sync failed"
     });
   }
 });
@@ -370,8 +394,8 @@ app.post("/webhooks/orders-create", async (req, res) => {
       actual_carrier: shipmentResult.carrier || null,
       fallback_used: shipmentResult.fallbackUsed || false,
       fallback_from: shipmentResult.fallbackFrom || null,
-      tracking_number: trackingNumber,
-      tracking_url: trackingUrl,
+      tracking_number: trackingNumber || null,
+      tracking_url: trackingUrl || null,
       shipment_success: shipmentResult.success,
       fulfillment_success: fulfillmentResult.success || false,
       shipment_result: shipmentResult,

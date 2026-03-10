@@ -7,6 +7,7 @@ const { createShipment } = require("./services/createShipment");
 const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
 const { collectRates } = require("./core/rateCollector");
 const { buildTrackingEvents } = require("./services/trackingEvents");
+const { fetchPostNordTracking } = require("./services/postnordTracking");
 const {
   beginOrderProcessing,
   failOrderProcessing,
@@ -113,12 +114,29 @@ app.get("/track/:trackingNumber", async (req, res) => {
     }
 
     const shipment = result.rows[0];
-    const events = buildTrackingEvents(shipment);
+
+    let carrierTracking = {
+      success: false,
+      skipped: true,
+      reason: "Live carrier tracking is only enabled for PostNord shipments",
+      events: [],
+      statusText: null
+    };
+
+    if (String(shipment.actual_carrier || "").toLowerCase() === "postnord") {
+      carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
+    }
+
+    const events = buildTrackingEvents({
+      shipment,
+      externalEvents: carrierTracking.events
+    });
 
     return res.status(200).send(
       renderTrackingPage({
         shipment,
-        events
+        events,
+        carrierTracking
       })
     );
   } catch (error) {

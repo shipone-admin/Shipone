@@ -49,7 +49,8 @@ function mapPostNordEventStatus(type, code, text) {
     combined.includes("en_route") ||
     combined.includes("transit") ||
     combined.includes("transport") ||
-    combined.includes("informed")
+    combined.includes("informed") ||
+    combined.includes("terminal")
   ) {
     return "active";
   }
@@ -197,6 +198,19 @@ function extractTopLevelStatus(data) {
   return value || null;
 }
 
+function getLatestEventAt(events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return null;
+  }
+
+  const timestamps = events
+    .map((event) => event?.occurredAt || null)
+    .filter(Boolean)
+    .sort();
+
+  return timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
+}
+
 async function fetchPostNordTracking(trackingNumber) {
   const apiKey = safeString(process.env.POSTNORD_API_KEY);
   const locale = safeString(process.env.POSTNORD_TRACKING_LOCALE || "sv");
@@ -208,7 +222,9 @@ async function fetchPostNordTracking(trackingNumber) {
       skipped: true,
       reason: "Missing tracking number",
       events: [],
-      statusText: null
+      statusText: null,
+      eventCount: 0,
+      latestEventAt: null
     };
   }
 
@@ -218,7 +234,9 @@ async function fetchPostNordTracking(trackingNumber) {
       skipped: true,
       reason: "POSTNORD_API_KEY is not configured",
       events: [],
-      statusText: null
+      statusText: null,
+      eventCount: 0,
+      latestEventAt: null
     };
   }
 
@@ -235,6 +253,7 @@ async function fetchPostNordTracking(trackingNumber) {
     const data = response.data;
     const events = normalizePostNordEvents(data);
     const statusText = extractTopLevelStatus(data);
+    const latestEventAt = getLatestEventAt(events);
 
     return {
       success: true,
@@ -242,6 +261,8 @@ async function fetchPostNordTracking(trackingNumber) {
       reason: null,
       events,
       statusText,
+      eventCount: events.length,
+      latestEventAt,
       raw: data
     };
   } catch (error) {
@@ -250,7 +271,9 @@ async function fetchPostNordTracking(trackingNumber) {
       skipped: false,
       reason: error.response?.data || error.message || "PostNord tracking request failed",
       events: [],
-      statusText: null
+      statusText: null,
+      eventCount: 0,
+      latestEventAt: null
     };
   }
 }

@@ -9,6 +9,7 @@ const { collectRates } = require("./core/rateCollector");
 const { buildTrackingEvents } = require("./services/trackingEvents");
 const { fetchPostNordTracking } = require("./services/postnordTracking");
 const { getDisplayStatus } = require("./services/trackingStatus");
+const { saveCarrierTrackingSnapshot } = require("./services/trackingSyncStore");
 const {
   beginOrderProcessing,
   failOrderProcessing,
@@ -121,11 +122,20 @@ app.get("/track/:trackingNumber", async (req, res) => {
       skipped: true,
       reason: "Live carrier tracking is only enabled for PostNord shipments",
       events: [],
-      statusText: null
+      statusText: null,
+      eventCount: 0,
+      latestEventAt: null
     };
 
     if (String(shipment.actual_carrier || "").toLowerCase() === "postnord") {
       carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
+
+      try {
+        await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
+      } catch (syncError) {
+        console.error("❌ Failed to save carrier tracking snapshot:");
+        console.error(syncError.message);
+      }
     }
 
     const displayStatus = getDisplayStatus({

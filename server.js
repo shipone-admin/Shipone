@@ -6,19 +6,24 @@ const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
 const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
 const { collectRates } = require("./core/rateCollector");
+
 const { buildTrackingEvents } = require("./services/trackingEvents");
 const { fetchPostNordTracking } = require("./services/postnordTracking");
 const { getDisplayStatus } = require("./services/trackingStatus");
 const { saveCarrierTrackingSnapshot } = require("./services/trackingSyncStore");
+
 const {
   syncPostNordTrackingByTrackingNumber,
   syncPostNordTrackingByOrderId
 } = require("./services/trackingSyncService");
+
 const {
   syncPostNordBatch,
   syncActivePostNordBatch
 } = require("./services/trackingBatchSyncService");
+
 const { runPostNordActiveSyncJob } = require("./services/jobSyncService");
+
 const {
   beginOrderProcessing,
   failOrderProcessing,
@@ -27,11 +32,13 @@ const {
   findShipmentByOrderId,
   getRecentShipments
 } = require("./services/shipmentStore");
+
 const {
   renderTrackingPage,
   renderTrackingNotFoundPage,
   renderTrackingErrorPage
 } = require("./views/trackingPage");
+
 const { renderHomePage } = require("./views/homePage");
 
 const app = express();
@@ -53,18 +60,12 @@ function getBearerToken(req) {
 function requireCronSecret(req, res, next) {
   const configuredSecret = String(process.env.CRON_SECRET || "").trim();
 
-  if (!configuredSecret) {
-    console.error("❌ CRON_SECRET is not configured");
+  const providedSecret =
+    getBearerToken(req) ||
+    req.query.token ||
+    "";
 
-    return res.status(500).json({
-      success: false,
-      error: "CRON_SECRET is not configured"
-    });
-  }
-
-  const providedSecret = getBearerToken(req);
-
-  if (!providedSecret || providedSecret !== configuredSecret) {
+  if (!configuredSecret || providedSecret !== configuredSecret) {
     return res.status(401).json({
       success: false,
       error: "Unauthorized"
@@ -89,8 +90,7 @@ app.get("/shipments", async (req, res) => {
       shipments
     });
   } catch (error) {
-    console.error("❌ Failed to read shipments:");
-    console.error(error.message);
+    console.error("Failed to read shipments:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -101,8 +101,7 @@ app.get("/shipments", async (req, res) => {
 
 app.get("/shipments/:orderId", async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const shipment = await findShipmentByOrderId(orderId);
+    const shipment = await findShipmentByOrderId(req.params.orderId);
 
     if (!shipment) {
       return res.status(404).json({
@@ -111,51 +110,29 @@ app.get("/shipments/:orderId", async (req, res) => {
       });
     }
 
-    return res.status(200).json({
+    return res.json({
       success: true,
       shipment
     });
   } catch (error) {
-    console.error("❌ Failed to read shipment by order id:");
-    console.error(error.message);
+    console.error("Shipment lookup failed:", error.message);
 
     return res.status(500).json({
       success: false,
-      error: "Failed to read shipment"
-    });
-  }
-});
-
-app.get("/shipments-debug", async (req, res) => {
-  try {
-    const shipments = await readShipments();
-
-    return res.status(200).json({
-      success: true,
-      total: shipments.length,
-      shipments
-    });
-  } catch (error) {
-    console.error("❌ Failed to debug shipments:");
-    console.error(error.message);
-
-    return res.status(500).json({
-      success: false,
-      error: "Failed to debug shipments"
+      error: "Shipment lookup failed"
     });
   }
 });
 
 app.get("/sync-tracking/:trackingNumber", async (req, res) => {
   try {
-    const { trackingNumber } = req.params;
+    const result = await syncPostNordTrackingByTrackingNumber(
+      req.params.trackingNumber
+    );
 
-    const syncResult = await syncPostNordTrackingByTrackingNumber(trackingNumber);
-
-    return res.status(syncResult.statusCode || 200).json(syncResult);
+    return res.status(result.statusCode || 200).json(result);
   } catch (error) {
-    console.error("❌ Manual tracking sync by tracking number failed:");
-    console.error(error.message);
+    console.error("Manual sync failed:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -166,18 +143,15 @@ app.get("/sync-tracking/:trackingNumber", async (req, res) => {
 
 app.get("/sync-tracking/order/:orderId", async (req, res) => {
   try {
-    const { orderId } = req.params;
+    const result = await syncPostNordTrackingByOrderId(req.params.orderId);
 
-    const syncResult = await syncPostNordTrackingByOrderId(orderId);
-
-    return res.status(syncResult.statusCode || 200).json(syncResult);
+    return res.status(result.statusCode || 200).json(result);
   } catch (error) {
-    console.error("❌ Manual tracking sync by order id failed:");
-    console.error(error.message);
+    console.error("Order sync failed:", error.message);
 
     return res.status(500).json({
       success: false,
-      error: "Manual tracking sync failed"
+      error: "Order tracking sync failed"
     });
   }
 });
@@ -193,73 +167,99 @@ app.get("/sync-tracking/batch/postnord", async (req, res) => {
       includeDelivered
     });
 
-    return res.status(200).json(result);
+    return res.json(result);
   } catch (error) {
-    console.error("❌ Batch tracking sync failed:");
-    console.error(error.message);
+    console.error("Batch sync failed:", error.message);
 
     return res.status(500).json({
       success: false,
-      error: "Batch tracking sync failed"
+      error: "Batch sync failed"
     });
   }
 });
 
 app.get("/sync-tracking/batch/postnord/active", async (req, res) => {
   try {
-    const limit = req.query.limit || 20;
-    const maxAgeDays = req.query.maxAgeDays || 30;
-
     const result = await syncActivePostNordBatch({
-      limit,
-      maxAgeDays
+      limit: req.query.limit || 20,
+      maxAgeDays: req.query.maxAgeDays || 30
     });
 
-    return res.status(200).json(result);
+    return res.json(result);
   } catch (error) {
-    console.error("❌ Active batch tracking sync failed:");
-    console.error(error.message);
+    console.error("Active batch sync failed:", error.message);
 
     return res.status(500).json({
       success: false,
-      error: "Active batch tracking sync failed"
+      error: "Active batch sync failed"
     });
   }
 });
 
 app.get("/jobs/sync-postnord-active", requireCronSecret, async (req, res) => {
   try {
-    const limit = req.query.limit || 20;
-    const maxAgeDays = req.query.maxAgeDays || 30;
-
     const result = await runPostNordActiveSyncJob({
-      limit,
-      maxAgeDays
+      limit: req.query.limit || 20,
+      maxAgeDays: req.query.maxAgeDays || 30
     });
 
     return res.status(result.success ? 200 : 500).json(result);
   } catch (error) {
-    console.error("❌ PostNord active sync job failed:");
-    console.error(error.message);
+    console.error("Job sync failed:", error.message);
 
     return res.status(500).json({
       success: false,
-      job: {
-        name: "sync-postnord-active",
-        status: "failed"
-      },
-      error: "PostNord active sync job failed"
+      error: "Job execution failed"
     });
   }
 });
 
+app.get(
+  "/admin/db/migrate-rate-limit",
+  requireCronSecret,
+  async (req, res) => {
+    try {
+      await query(`
+        ALTER TABLE shipments
+        ADD COLUMN IF NOT EXISTS carrier_next_sync_at TIMESTAMP;
+      `);
+
+      await query(`
+        ALTER TABLE shipments
+        ADD COLUMN IF NOT EXISTS carrier_sync_attempts INTEGER DEFAULT 0;
+      `);
+
+      await query(`
+        ALTER TABLE shipments
+        ADD COLUMN IF NOT EXISTS carrier_last_sync_status TEXT;
+      `);
+
+      await query(`
+        UPDATE shipments
+        SET carrier_next_sync_at = NOW()
+        WHERE carrier_next_sync_at IS NULL;
+      `);
+
+      return res.json({
+        success: true,
+        message: "Rate limit migration completed"
+      });
+    } catch (error) {
+      console.error("Migration failed:", error.message);
+
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+);
+
 app.get("/track/:trackingNumber", async (req, res) => {
   try {
-    const { trackingNumber } = req.params;
-
     const result = await query(
       `SELECT * FROM shipments WHERE tracking_number = $1 LIMIT 1`,
-      [trackingNumber]
+      [req.params.trackingNumber]
     );
 
     if (result.rows.length === 0) {
@@ -271,22 +271,21 @@ app.get("/track/:trackingNumber", async (req, res) => {
     let carrierTracking = {
       success: false,
       skipped: true,
-      reason: "Live carrier tracking is only enabled for PostNord shipments",
       events: [],
-      statusText: null,
-      eventCount: 0,
-      latestEventAt: null
+      statusText: null
     };
 
-    if (String(shipment.actual_carrier || "").toLowerCase() === "postnord") {
-      carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
+    if (
+      String(shipment.actual_carrier || "").toLowerCase() === "postnord"
+    ) {
+      carrierTracking = await fetchPostNordTracking(
+        shipment.tracking_number
+      );
 
-      try {
-        await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
-      } catch (syncError) {
-        console.error("❌ Failed to save carrier tracking snapshot:");
-        console.error(syncError.message);
-      }
+      await saveCarrierTrackingSnapshot(
+        shipment.id,
+        carrierTracking
+      );
     }
 
     const displayStatus = getDisplayStatus({
@@ -299,7 +298,7 @@ app.get("/track/:trackingNumber", async (req, res) => {
       externalEvents: carrierTracking.events
     });
 
-    return res.status(200).send(
+    return res.send(
       renderTrackingPage({
         shipment,
         events,
@@ -308,44 +307,9 @@ app.get("/track/:trackingNumber", async (req, res) => {
       })
     );
   } catch (error) {
-    console.error("❌ Tracking lookup failed:");
-    console.error(error.message);
+    console.error("Tracking lookup failed:", error.message);
 
     return res.status(500).send(renderTrackingErrorPage());
-  }
-});
-
-app.get("/oauth/callback", async (req, res) => {
-  try {
-    const { code, shop } = req.query;
-
-    console.log("SHOP:", shop);
-    console.log("CODE:", code);
-
-    if (!code) {
-      return res.send("No OAuth code received");
-    }
-
-    const response = await axios.post(
-      `https://${shop}/admin/oauth/access_token`,
-      {
-        client_id: process.env.SHOPIFY_CLIENT_ID,
-        client_secret: process.env.SHOPIFY_CLIENT_SECRET,
-        code: code
-      }
-    );
-
-    const accessToken = response.data.access_token;
-
-    console.log("✅ SHOPIFY ACCESS TOKEN:");
-    console.log(accessToken);
-
-    return res.send("TOKEN GENERATED. CHECK RAILWAY LOGS.");
-  } catch (error) {
-    console.error("❌ OAuth error:");
-    console.error(error.response?.data || error.message);
-
-    return res.send("OAuth failed");
   }
 });
 
@@ -353,34 +317,17 @@ app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
 
   try {
-    console.log("📦 NEW ORDER:", order?.name);
-
     if (!order || !order.id) {
-      console.log("❌ Missing order id");
       return res.sendStatus(200);
     }
 
-    const processingState = await beginOrderProcessing(order);
+    const state = await beginOrderProcessing(order);
 
-    if (!processingState.started) {
-      if (processingState.reason === "already_processing") {
-        console.log("🛑 Duplicate webhook blocked: order already processing");
-        console.log("Order ID:", order.id);
-        return res.sendStatus(200);
-      }
-
-      if (processingState.reason === "already_completed") {
-        console.log("🛑 Duplicate webhook blocked: order already completed");
-        console.log("Order ID:", order.id);
-        return res.sendStatus(200);
-      }
+    if (!state.started) {
+      return res.sendStatus(200);
     }
 
-    console.log("🔒 Idempotency lock created for order:", order.id);
-
     if (!order.shipping_address) {
-      console.log("❌ Missing shipping address");
-
       await failOrderProcessing(order.id, {
         order_name: order.name,
         error: "Missing shipping address"
@@ -391,138 +338,56 @@ app.post("/webhooks/orders-create", async (req, res) => {
 
     const shippingOptions = await collectRates(order);
 
-    let shiponePreference = "SMART";
-
-    if (Array.isArray(order.note_attributes)) {
-      const attr = order.note_attributes.find(
-        (a) => a.name === "shipone_delivery"
-      );
-
-      if (attr && attr.value) {
-        shiponePreference = attr.value;
-      }
-    }
-
-    if (shiponePreference === "FASTEST") shiponePreference = "FAST";
-    if (shiponePreference === "CHEAPEST") shiponePreference = "CHEAP";
-    if (shiponePreference === "GREEN") shiponePreference = "SMART";
-
-    console.log("🚚 ShipOne Choice:", shiponePreference);
-
     const selectedOption = chooseBestOption(
       shippingOptions,
-      shiponePreference.toUpperCase()
+      "SMART"
     );
 
     if (!selectedOption) {
-      console.log("❌ No shipping option could be selected");
-
       await failOrderProcessing(order.id, {
         order_name: order.name,
-        shipone_choice: shiponePreference,
         error: "No shipping option selected"
       });
 
       return res.sendStatus(200);
     }
 
-    console.log("✅ Selected option:");
-    console.log(selectedOption);
-
-    order.shipone_choice = selectedOption;
-
-    const shipmentResult = await createShipment(order, selectedOption);
-
-    let fulfillmentResult = {
-      success: false,
-      skipped: true,
-      reason: "Shipment was not created"
-    };
+    const shipmentResult = await createShipment(
+      order,
+      selectedOption
+    );
 
     let trackingNumber = null;
     let trackingUrl = null;
 
     if (shipmentResult.success && shipmentResult.data) {
-      trackingNumber = shipmentResult.data.trackingNumber || null;
-      trackingUrl = shipmentResult.data.trackingUrl || null;
+      trackingNumber =
+        shipmentResult.data.trackingNumber || null;
 
-      fulfillmentResult = await fulfillShopifyOrder(
+      trackingUrl =
+        shipmentResult.data.trackingUrl || null;
+
+      await fulfillShopifyOrder(
         order.id,
         trackingNumber,
         trackingUrl
       );
-
-      if (fulfillmentResult.success) {
-        console.log("✅ Shopify fulfillment completed");
-      } else {
-        console.log("❌ Shopify fulfillment failed");
-        console.log(
-          JSON.stringify(
-            {
-              step: fulfillmentResult.step,
-              status: fulfillmentResult.status,
-              error: fulfillmentResult.error,
-              attempts: fulfillmentResult.attempts || 1
-            },
-            null,
-            2
-          )
-        );
-      }
-    } else {
-      console.log("❌ Shipment creation failed, skipping Shopify fulfillment");
     }
 
-    const storedRecord = await saveShipmentOutcome(order, {
-      shipone_choice: shiponePreference,
-      selected_option: selectedOption,
-      selected_carrier: selectedOption.carrier || null,
-      selected_service: selectedOption.name || null,
-      actual_carrier: shipmentResult.carrier || null,
-      fallback_used: shipmentResult.fallbackUsed || false,
-      fallback_from: shipmentResult.fallbackFrom || null,
-      tracking_number: trackingNumber || null,
-      tracking_url: trackingUrl || null,
-      shipment_success: shipmentResult.success,
-      fulfillment_success: fulfillmentResult.success || false,
-      shipment_result: shipmentResult,
-      fulfillment_result: fulfillmentResult,
-      error:
-        shipmentResult.success
-          ? fulfillmentResult.success
-            ? null
-            : fulfillmentResult.error || "Shopify fulfillment failed"
-          : shipmentResult.error || "Shipment creation failed"
+    await saveShipmentOutcome(order, {
+      tracking_number: trackingNumber,
+      tracking_url: trackingUrl,
+      shipment_success: shipmentResult.success
     });
 
-    console.log("💾 Shipment stored with completed status");
-    console.log("🧾 Stored record summary:");
-    console.log(
-      JSON.stringify(
-        {
-          order_id: storedRecord.order_id,
-          order_name: storedRecord.order_name,
-          status: storedRecord.status,
-          selected_carrier: storedRecord.selected_carrier,
-          actual_carrier: storedRecord.actual_carrier,
-          tracking_number: storedRecord.tracking_number,
-          fulfillment_success: storedRecord.fulfillment_success
-        },
-        null,
-        2
-      )
-    );
-
     return res.sendStatus(200);
-  } catch (err) {
-    console.error("❌ SHIPMENT ERROR:");
-    console.error(err.response?.data || err.message);
+  } catch (error) {
+    console.error("Shipment error:", error.message);
 
     if (order && order.id) {
       await failOrderProcessing(order.id, {
         order_name: order.name,
-        error: err.response?.data || err.message,
-        failed_at: new Date().toISOString()
+        error: error.message
       });
     }
 
@@ -535,11 +400,10 @@ async function startServer() {
     await initDatabase();
 
     app.listen(PORT, () => {
-      console.log(`🚀 ShipOne running on port ${PORT}`);
+      console.log(`ShipOne running on port ${PORT}`);
     });
   } catch (error) {
-    console.error("❌ Failed to start server:");
-    console.error(error.message);
+    console.error("Server start failed:", error.message);
     process.exit(1);
   }
 }

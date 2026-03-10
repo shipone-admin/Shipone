@@ -1,7 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 
-const { initDatabase } = require("./services/db");
+const { initDatabase, query } = require("./services/db");
 const { chooseBestOption } = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
 const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
@@ -88,6 +88,48 @@ app.get("/shipments-debug", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to debug shipments"
+    });
+  }
+});
+
+// ================================
+// TRACKING ENDPOINT
+// ================================
+app.get("/track/:trackingNumber", async (req, res) => {
+  try {
+    const { trackingNumber } = req.params;
+
+    const result = await query(
+      `SELECT * FROM shipments WHERE tracking_number = $1 LIMIT 1`,
+      [trackingNumber]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Tracking number not found"
+      });
+    }
+
+    const shipment = result.rows[0];
+
+    return res.status(200).json({
+      success: true,
+      tracking_number: shipment.tracking_number,
+      order_name: shipment.order_name,
+      carrier: shipment.actual_carrier,
+      status: shipment.status,
+      tracking_url: shipment.tracking_url,
+      created_at: shipment.created_at,
+      completed_at: shipment.completed_at
+    });
+  } catch (error) {
+    console.error("❌ Tracking lookup failed:");
+    console.error(error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "Tracking lookup failed"
     });
   }
 });

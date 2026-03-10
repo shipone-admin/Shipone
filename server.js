@@ -39,6 +39,41 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
+function getBearerToken(req) {
+  const header = req.headers.authorization || "";
+  const prefix = "Bearer ";
+
+  if (!header.startsWith(prefix)) {
+    return null;
+  }
+
+  return header.slice(prefix.length).trim();
+}
+
+function requireCronSecret(req, res, next) {
+  const configuredSecret = String(process.env.CRON_SECRET || "").trim();
+
+  if (!configuredSecret) {
+    console.error("❌ CRON_SECRET is not configured");
+
+    return res.status(500).json({
+      success: false,
+      error: "CRON_SECRET is not configured"
+    });
+  }
+
+  const providedSecret = getBearerToken(req);
+
+  if (!providedSecret || providedSecret !== configuredSecret) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized"
+    });
+  }
+
+  return next();
+}
+
 app.get("/", (req, res) => {
   return res.status(200).send(renderHomePage());
 });
@@ -192,7 +227,7 @@ app.get("/sync-tracking/batch/postnord/active", async (req, res) => {
   }
 });
 
-app.get("/jobs/sync-postnord-active", async (req, res) => {
+app.get("/jobs/sync-postnord-active", requireCronSecret, async (req, res) => {
   try {
     const limit = req.query.limit || 20;
     const maxAgeDays = req.query.maxAgeDays || 30;

@@ -1,497 +1,414 @@
 const { query } = require("./db");
 
-function buildBaseRecord(order) {
-  return {
-    order_id: order.id || null,
-    order_name: order.name || null,
-    order_number: order.order_number || null,
-    email: order.email || null,
-    customer_name: order.customer
-      ? `${order.customer.first_name || ""} ${order.customer.last_name || ""}`.trim() || null
-      : null,
-    shipping_city: order.shipping_address?.city || null,
-    shipping_zip: order.shipping_address?.zip || null,
-    shipping_country: order.shipping_address?.country || null,
-    status: "processing",
-    retry_count: 0,
-    shipone_choice: null,
-    selected_option: null,
-    selected_carrier: null,
-    selected_service: null,
-    actual_carrier: null,
-    fallback_used: false,
-    fallback_from: null,
-    tracking_number: null,
-    tracking_url: null,
-    shipment_success: false,
-    fulfillment_success: false,
-    shipment_result: null,
-    fulfillment_result: null,
-    error: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    completed_at: null,
-    failed_at: null
-  };
-}
-
-function mapRow(row) {
-  return {
-    id: row.id,
-    order_id: Number(row.order_id),
-    order_name: row.order_name,
-    order_number: row.order_number,
-    email: row.email,
-    customer_name: row.customer_name,
-    shipping_city: row.shipping_city,
-    shipping_zip: row.shipping_zip,
-    shipping_country: row.shipping_country,
-    status: row.status,
-    retry_count: row.retry_count,
-    shipone_choice: row.shipone_choice,
-    selected_option: row.selected_option,
-    selected_carrier: row.selected_carrier,
-    selected_service: row.selected_service,
-    actual_carrier: row.actual_carrier,
-    fallback_used: row.fallback_used,
-    fallback_from: row.fallback_from,
-    tracking_number: row.tracking_number,
-    tracking_url: row.tracking_url,
-    shipment_success: row.shipment_success,
-    fulfillment_success: row.fulfillment_success,
-    shipment_result: row.shipment_result,
-    fulfillment_result: row.fulfillment_result,
-    error: row.error,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    completed_at: row.completed_at,
-    failed_at: row.failed_at
-  };
-}
-
-async function findShipmentByOrderId(orderId) {
-  const result = await query(
-    `SELECT * FROM shipments WHERE order_id = $1 LIMIT 1`,
-    [orderId]
-  );
-
-  if (result.rows.length === 0) {
+function normalizeOrderNumber(order) {
+  if (!order || order.order_number === undefined || order.order_number === null) {
     return null;
   }
 
-  return mapRow(result.rows[0]);
+  const value = Number(order.order_number);
+  return Number.isNaN(value) ? null : value;
+}
+
+function buildCustomerName(order) {
+  const firstName = String(order?.customer?.first_name || "").trim();
+  const lastName = String(order?.customer?.last_name || "").trim();
+  const fullName = `${firstName} ${lastName}`.trim();
+
+  return fullName || null;
+}
+
+function buildShippingAddress(order) {
+  return order?.shipping_address || {};
+}
+
+function normalizeBoolean(value) {
+  return Boolean(value);
+}
+
+function normalizeRetryCount(value) {
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 async function beginOrderProcessing(order) {
-  const existing = await findShipmentByOrderId(order.id);
+  const shippingAddress = buildShippingAddress(order);
+  const orderNumber = normalizeOrderNumber(order);
+  const customerName = buildCustomerName(order);
 
-  if (existing) {
-    if (existing.status === "processing") {
+  const existingResult = await query(
+    `
+      SELECT
+        id,
+        order_id,
+        status
+      FROM shipments
+      WHERE order_id = $1
+      LIMIT 1
+    `,
+    [order.id]
+  );
+
+  if (existingResult.rows.length > 0) {
+    const existing = existingResult.rows[0];
+    const existingStatus = String(existing.status || "").toLowerCase();
+
+    if (existingStatus === "processing") {
       return {
         started: false,
         reason: "already_processing",
-        existing
+        shipment: existing
       };
     }
 
-    if (existing.status === "completed") {
+    if (existingStatus === "completed") {
       return {
         started: false,
         reason: "already_completed",
-        existing
+        shipment: existing
       };
     }
 
-    if (existing.status === "failed") {
-      const result = await query(
-        `
+    await query(
+      `
         UPDATE shipments
         SET
           order_name = $2,
+          order_number = $3,
+          email = $4,
+          customer_name = $5,
+          shipping_city = $6,
+          shipping_zip = $7,
+          shipping_country = $8,
           status = 'processing',
-          retry_count = retry_count + 1,
+          retry_count = COALESCE(retry_count, 0) + 1,
           error = NULL,
           failed_at = NULL,
           updated_at = NOW()
         WHERE order_id = $1
-        RETURNING *
-        `,
-        [order.id, order.name || existing.order_name]
-      );
+      `,
+      [
+        order.id,
+        order.name || null,
+        orderNumber,
+        order.email || null,
+        customerName,
+        shippingAddress.city || null,
+        shippingAddress.zip || null,
+        shippingAddress.country || null
+      ]
+    );
 
-      return {
-        started: true,
-        reusedFailedRecord: true,
-        record: mapRow(result.rows[0])
-      };
-    }
+    return {
+      started: true,
+      reason: "restarted"
+    };
   }
 
-  const base = buildBaseRecord(order);
-
-  const result = await query(
+  await query(
     `
-    INSERT INTO shipments (
-      order_id,
-      order_name,
-      order_number,
-      email,
-      customer_name,
-      shipping_city,
-      shipping_zip,
-      shipping_country,
-      status,
-      retry_count,
-      shipone_choice,
-      selected_option,
-      selected_carrier,
-      selected_service,
-      actual_carrier,
-      fallback_used,
-      fallback_from,
-      tracking_number,
-      tracking_url,
-      shipment_success,
-      fulfillment_success,
-      shipment_result,
-      fulfillment_result,
-      error,
-      created_at,
-      updated_at,
-      completed_at,
-      failed_at
-    )
-    VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-      $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-      $21,$22,$23,$24,$25,$26,$27,$28
-    )
-    RETURNING *
+      INSERT INTO shipments (
+        order_id,
+        order_name,
+        order_number,
+        email,
+        customer_name,
+        shipping_city,
+        shipping_zip,
+        shipping_country,
+        status,
+        retry_count,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        'processing',
+        0,
+        NOW(),
+        NOW()
+      )
     `,
     [
-      base.order_id,
-      base.order_name,
-      base.order_number,
-      base.email,
-      base.customer_name,
-      base.shipping_city,
-      base.shipping_zip,
-      base.shipping_country,
-      base.status,
-      base.retry_count,
-      base.shipone_choice,
-      base.selected_option,
-      base.selected_carrier,
-      base.selected_service,
-      base.actual_carrier,
-      base.fallback_used,
-      base.fallback_from,
-      base.tracking_number,
-      base.tracking_url,
-      base.shipment_success,
-      base.fulfillment_success,
-      base.shipment_result,
-      base.fulfillment_result,
-      base.error,
-      base.created_at,
-      base.updated_at,
-      base.completed_at,
-      base.failed_at
+      order.id,
+      order.name || null,
+      orderNumber,
+      order.email || null,
+      customerName,
+      shippingAddress.city || null,
+      shippingAddress.zip || null,
+      shippingAddress.country || null
     ]
   );
 
   return {
     started: true,
-    reusedFailedRecord: false,
-    record: mapRow(result.rows[0])
+    reason: "created"
   };
 }
 
-async function completeOrderProcessing(orderId, payload = {}) {
-  const existing = await findShipmentByOrderId(orderId);
-  const base = existing || buildBaseRecord({ id: orderId });
-
-  const merged = {
-    ...base,
-    ...payload,
-    status: "completed",
-    error: null,
-    updated_at: new Date().toISOString(),
-    completed_at: new Date().toISOString(),
-    failed_at: null
-  };
+async function failOrderProcessing(orderId, failureData = {}) {
+  const failedAt = failureData.failed_at || new Date().toISOString();
 
   const result = await query(
     `
-    INSERT INTO shipments (
-      order_id,
-      order_name,
-      order_number,
-      email,
-      customer_name,
-      shipping_city,
-      shipping_zip,
-      shipping_country,
-      status,
-      retry_count,
-      shipone_choice,
-      selected_option,
-      selected_carrier,
-      selected_service,
-      actual_carrier,
-      fallback_used,
-      fallback_from,
-      tracking_number,
-      tracking_url,
-      shipment_success,
-      fulfillment_success,
-      shipment_result,
-      fulfillment_result,
-      error,
-      created_at,
-      updated_at,
-      completed_at,
-      failed_at
-    )
-    VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-      $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-      $21,$22,$23,$24,$25,$26,$27,$28
-    )
-    ON CONFLICT (order_id)
-    DO UPDATE SET
-      order_name = EXCLUDED.order_name,
-      order_number = EXCLUDED.order_number,
-      email = EXCLUDED.email,
-      customer_name = EXCLUDED.customer_name,
-      shipping_city = EXCLUDED.shipping_city,
-      shipping_zip = EXCLUDED.shipping_zip,
-      shipping_country = EXCLUDED.shipping_country,
-      status = EXCLUDED.status,
-      retry_count = EXCLUDED.retry_count,
-      shipone_choice = EXCLUDED.shipone_choice,
-      selected_option = EXCLUDED.selected_option,
-      selected_carrier = EXCLUDED.selected_carrier,
-      selected_service = EXCLUDED.selected_service,
-      actual_carrier = EXCLUDED.actual_carrier,
-      fallback_used = EXCLUDED.fallback_used,
-      fallback_from = EXCLUDED.fallback_from,
-      tracking_number = EXCLUDED.tracking_number,
-      tracking_url = EXCLUDED.tracking_url,
-      shipment_success = EXCLUDED.shipment_success,
-      fulfillment_success = EXCLUDED.fulfillment_success,
-      shipment_result = EXCLUDED.shipment_result,
-      fulfillment_result = EXCLUDED.fulfillment_result,
-      error = EXCLUDED.error,
-      updated_at = EXCLUDED.updated_at,
-      completed_at = EXCLUDED.completed_at,
-      failed_at = EXCLUDED.failed_at
-    RETURNING *
+      UPDATE shipments
+      SET
+        order_name = COALESCE($2, order_name),
+        status = 'failed',
+        error = $3,
+        failed_at = $4,
+        updated_at = NOW()
+      WHERE order_id = $1
+      RETURNING *
     `,
     [
-      merged.order_id,
-      merged.order_name,
-      merged.order_number,
-      merged.email,
-      merged.customer_name,
-      merged.shipping_city,
-      merged.shipping_zip,
-      merged.shipping_country,
-      merged.status,
-      merged.retry_count,
-      merged.shipone_choice,
-      merged.selected_option,
-      merged.selected_carrier,
-      merged.selected_service,
-      merged.actual_carrier,
-      merged.fallback_used,
-      merged.fallback_from,
-      merged.tracking_number,
-      merged.tracking_url,
-      merged.shipment_success,
-      merged.fulfillment_success,
-      merged.shipment_result,
-      merged.fulfillment_result,
-      merged.error,
-      merged.created_at,
-      merged.updated_at,
-      merged.completed_at,
-      merged.failed_at
+      orderId,
+      failureData.order_name || null,
+      failureData.error || "Unknown shipment failure",
+      failedAt
     ]
   );
 
-  return mapRow(result.rows[0]);
+  return result.rows[0] || null;
 }
 
-async function failOrderProcessing(orderId, payload = {}) {
-  const existing = await findShipmentByOrderId(orderId);
-  const base = existing || buildBaseRecord({ id: orderId });
+async function saveShipmentOutcome(order, outcome = {}) {
+  const shippingAddress = buildShippingAddress(order);
+  const orderNumber = normalizeOrderNumber(order);
+  const customerName = buildCustomerName(order);
 
-  const merged = {
-    ...base,
-    ...payload,
-    status: "failed",
-    updated_at: new Date().toISOString(),
-    failed_at: new Date().toISOString()
-  };
+  const shipmentSuccess = normalizeBoolean(outcome.shipment_success);
+  const fulfillmentSuccess = normalizeBoolean(outcome.fulfillment_success);
+
+  let finalStatus = "failed";
+
+  if (shipmentSuccess && fulfillmentSuccess) {
+    finalStatus = "completed";
+  } else if (shipmentSuccess && !fulfillmentSuccess) {
+    finalStatus = "failed";
+  } else if (!shipmentSuccess) {
+    finalStatus = "failed";
+  }
+
+  const completedAt = finalStatus === "completed" ? new Date().toISOString() : null;
+  const failedAt = finalStatus === "failed" ? new Date().toISOString() : null;
 
   const result = await query(
     `
-    INSERT INTO shipments (
-      order_id,
-      order_name,
-      order_number,
-      email,
-      customer_name,
-      shipping_city,
-      shipping_zip,
-      shipping_country,
-      status,
-      retry_count,
-      shipone_choice,
-      selected_option,
-      selected_carrier,
-      selected_service,
-      actual_carrier,
-      fallback_used,
-      fallback_from,
-      tracking_number,
-      tracking_url,
-      shipment_success,
-      fulfillment_success,
-      shipment_result,
-      fulfillment_result,
-      error,
-      created_at,
-      updated_at,
-      completed_at,
-      failed_at
-    )
-    VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-      $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-      $21,$22,$23,$24,$25,$26,$27,$28
-    )
-    ON CONFLICT (order_id)
-    DO UPDATE SET
-      order_name = EXCLUDED.order_name,
-      order_number = EXCLUDED.order_number,
-      email = EXCLUDED.email,
-      customer_name = EXCLUDED.customer_name,
-      shipping_city = EXCLUDED.shipping_city,
-      shipping_zip = EXCLUDED.shipping_zip,
-      shipping_country = EXCLUDED.shipping_country,
-      status = EXCLUDED.status,
-      retry_count = EXCLUDED.retry_count,
-      shipone_choice = EXCLUDED.shipone_choice,
-      selected_option = EXCLUDED.selected_option,
-      selected_carrier = EXCLUDED.selected_carrier,
-      selected_service = EXCLUDED.selected_service,
-      actual_carrier = EXCLUDED.actual_carrier,
-      fallback_used = EXCLUDED.fallback_used,
-      fallback_from = EXCLUDED.fallback_from,
-      tracking_number = EXCLUDED.tracking_number,
-      tracking_url = EXCLUDED.tracking_url,
-      shipment_success = EXCLUDED.shipment_success,
-      fulfillment_success = EXCLUDED.fulfillment_success,
-      shipment_result = EXCLUDED.shipment_result,
-      fulfillment_result = EXCLUDED.fulfillment_result,
-      error = EXCLUDED.error,
-      updated_at = EXCLUDED.updated_at,
-      completed_at = EXCLUDED.completed_at,
-      failed_at = EXCLUDED.failed_at
-    RETURNING *
+      UPDATE shipments
+      SET
+        order_name = $2,
+        order_number = $3,
+        email = $4,
+        customer_name = $5,
+        shipping_city = $6,
+        shipping_zip = $7,
+        shipping_country = $8,
+        status = $9,
+        shipone_choice = $10,
+        selected_option = $11,
+        selected_carrier = $12,
+        selected_service = $13,
+        actual_carrier = $14,
+        fallback_used = $15,
+        fallback_from = $16,
+        tracking_number = $17,
+        tracking_url = $18,
+        shipment_success = $19,
+        fulfillment_success = $20,
+        shipment_result = $21,
+        fulfillment_result = $22,
+        error = $23,
+        completed_at = CASE
+          WHEN $24::timestamptz IS NOT NULL THEN $24::timestamptz
+          ELSE completed_at
+        END,
+        failed_at = CASE
+          WHEN $25::timestamptz IS NOT NULL THEN $25::timestamptz
+          ELSE failed_at
+        END,
+        updated_at = NOW()
+      WHERE order_id = $1
+      RETURNING *
     `,
     [
-      merged.order_id,
-      merged.order_name,
-      merged.order_number,
-      merged.email,
-      merged.customer_name,
-      merged.shipping_city,
-      merged.shipping_zip,
-      merged.shipping_country,
-      merged.status,
-      merged.retry_count,
-      merged.shipone_choice,
-      merged.selected_option,
-      merged.selected_carrier,
-      merged.selected_service,
-      merged.actual_carrier,
-      merged.fallback_used,
-      merged.fallback_from,
-      merged.tracking_number,
-      merged.tracking_url,
-      merged.shipment_success,
-      merged.fulfillment_success,
-      merged.shipment_result,
-      merged.fulfillment_result,
-      merged.error,
-      merged.created_at,
-      merged.updated_at,
-      merged.completed_at,
-      merged.failed_at
+      order.id,
+      order.name || null,
+      orderNumber,
+      order.email || null,
+      customerName,
+      shippingAddress.city || null,
+      shippingAddress.zip || null,
+      shippingAddress.country || null,
+      finalStatus,
+      outcome.shipone_choice || null,
+      outcome.selected_option ? JSON.stringify(outcome.selected_option) : null,
+      outcome.selected_carrier || null,
+      outcome.selected_service || null,
+      outcome.actual_carrier || null,
+      normalizeBoolean(outcome.fallback_used),
+      outcome.fallback_from || null,
+      outcome.tracking_number || null,
+      outcome.tracking_url || null,
+      shipmentSuccess,
+      fulfillmentSuccess,
+      outcome.shipment_result ? JSON.stringify(outcome.shipment_result) : null,
+      outcome.fulfillment_result ? JSON.stringify(outcome.fulfillment_result) : null,
+      outcome.error || null,
+      completedAt,
+      failedAt
     ]
   );
 
-  return mapRow(result.rows[0]);
-}
-
-async function saveShipmentOutcome(order, context = {}) {
-  const payload = {
-    order_name: order?.name || null,
-    order_number: order?.order_number || null,
-    email: order?.email || null,
-    customer_name: order?.customer
-      ? `${order.customer.first_name || ""} ${order.customer.last_name || ""}`.trim() || null
-      : null,
-    shipping_city: order?.shipping_address?.city || null,
-    shipping_zip: order?.shipping_address?.zip || null,
-    shipping_country: order?.shipping_address?.country || null,
-    shipone_choice: context.shipone_choice || null,
-    selected_option: context.selected_option || null,
-    selected_carrier: context.selected_carrier || null,
-    selected_service: context.selected_service || null,
-    actual_carrier: context.actual_carrier || null,
-    fallback_used: Boolean(context.fallback_used),
-    fallback_from: context.fallback_from || null,
-    tracking_number: context.tracking_number || null,
-    tracking_url: context.tracking_url || null,
-    shipment_success: Boolean(context.shipment_success),
-    fulfillment_success: Boolean(context.fulfillment_success),
-    shipment_result: context.shipment_result || null,
-    fulfillment_result: context.fulfillment_result || null,
-    error: context.error || null
-  };
-
-  return completeOrderProcessing(order.id, payload);
+  return result.rows[0] || null;
 }
 
 async function readShipments() {
   const result = await query(
-    `SELECT * FROM shipments ORDER BY updated_at DESC`
+    `
+      SELECT
+        id,
+        order_id,
+        order_name,
+        order_number,
+        email,
+        customer_name,
+        shipping_city,
+        shipping_zip,
+        shipping_country,
+        status,
+        retry_count,
+        shipone_choice,
+        selected_option,
+        selected_carrier,
+        selected_service,
+        actual_carrier,
+        fallback_used,
+        fallback_from,
+        tracking_number,
+        tracking_url,
+        shipment_success,
+        fulfillment_success,
+        shipment_result,
+        fulfillment_result,
+        error,
+        carrier_status_text,
+        carrier_last_event_at,
+        carrier_event_count,
+        carrier_last_synced_at,
+        created_at,
+        updated_at,
+        completed_at,
+        failed_at
+      FROM shipments
+      ORDER BY created_at DESC, id DESC
+    `
   );
 
-  return result.rows.map(mapRow);
+  return result.rows;
+}
+
+async function findShipmentByOrderId(orderId) {
+  const result = await query(
+    `
+      SELECT
+        id,
+        order_id,
+        order_name,
+        order_number,
+        email,
+        customer_name,
+        shipping_city,
+        shipping_zip,
+        shipping_country,
+        status,
+        retry_count,
+        shipone_choice,
+        selected_option,
+        selected_carrier,
+        selected_service,
+        actual_carrier,
+        fallback_used,
+        fallback_from,
+        tracking_number,
+        tracking_url,
+        shipment_success,
+        fulfillment_success,
+        shipment_result,
+        fulfillment_result,
+        error,
+        carrier_status_text,
+        carrier_last_event_at,
+        carrier_event_count,
+        carrier_last_synced_at,
+        created_at,
+        updated_at,
+        completed_at,
+        failed_at
+      FROM shipments
+      WHERE order_id = $1
+      LIMIT 1
+    `,
+    [orderId]
+  );
+
+  return result.rows[0] || null;
 }
 
 async function getRecentShipments(limit = 20) {
-  const safeLimit = Number.isFinite(Number(limit)) ? Number(limit) : 20;
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
 
   const result = await query(
-    `SELECT * FROM shipments ORDER BY updated_at DESC LIMIT $1`,
+    `
+      SELECT
+        id,
+        order_id,
+        order_name,
+        order_number,
+        email,
+        customer_name,
+        shipping_city,
+        shipping_zip,
+        shipping_country,
+        status,
+        retry_count,
+        shipone_choice,
+        selected_option,
+        selected_carrier,
+        selected_service,
+        actual_carrier,
+        fallback_used,
+        fallback_from,
+        tracking_number,
+        tracking_url,
+        shipment_success,
+        fulfillment_success,
+        shipment_result,
+        fulfillment_result,
+        error,
+        carrier_status_text,
+        carrier_last_event_at,
+        carrier_event_count,
+        carrier_last_synced_at,
+        created_at,
+        updated_at,
+        completed_at,
+        failed_at
+      FROM shipments
+      ORDER BY created_at DESC, id DESC
+      LIMIT $1
+    `,
     [safeLimit]
   );
 
-  return result.rows.map(mapRow);
+  return result.rows;
 }
 
 module.exports = {
-  findShipmentByOrderId,
   beginOrderProcessing,
-  completeOrderProcessing,
   failOrderProcessing,
   saveShipmentOutcome,
   readShipments,
+  findShipmentByOrderId,
   getRecentShipments
 };

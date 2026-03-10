@@ -8,6 +8,7 @@ const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
 const { collectRates } = require("./core/rateCollector");
 const { buildTrackingEvents } = require("./services/trackingEvents");
 const { fetchPostNordTracking } = require("./services/postnordTracking");
+const { getDisplayStatus } = require("./services/trackingStatus");
 const {
   beginOrderProcessing,
   failOrderProcessing,
@@ -127,6 +128,11 @@ app.get("/track/:trackingNumber", async (req, res) => {
       carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
     }
 
+    const displayStatus = getDisplayStatus({
+      shipment,
+      carrierTracking
+    });
+
     const events = buildTrackingEvents({
       shipment,
       externalEvents: carrierTracking.events
@@ -136,7 +142,8 @@ app.get("/track/:trackingNumber", async (req, res) => {
       renderTrackingPage({
         shipment,
         events,
-        carrierTracking
+        carrierTracking,
+        displayStatus
       })
     );
   } catch (error) {

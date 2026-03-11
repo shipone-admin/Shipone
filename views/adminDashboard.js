@@ -44,24 +44,18 @@ function formatRelativeNextSync(value) {
   const absMinutes = Math.abs(diffMinutes);
 
   if (absMinutes < 60) {
-    return diffMinutes > 0
-      ? `Om ${absMinutes} min`
-      : `${absMinutes} min sen`;
+    return diffMinutes > 0 ? `Om ${absMinutes} min` : `${absMinutes} min sen`;
   }
 
   const absHours = Math.round(absMinutes / 60);
 
   if (absHours < 24) {
-    return diffMinutes > 0
-      ? `Om ${absHours} h`
-      : `${absHours} h sen`;
+    return diffMinutes > 0 ? `Om ${absHours} h` : `${absHours} h sen`;
   }
 
   const absDays = Math.round(absHours / 24);
 
-  return diffMinutes > 0
-    ? `Om ${absDays} d`
-    : `${absDays} d sen`;
+  return diffMinutes > 0 ? `Om ${absDays} d` : `${absDays} d sen`;
 }
 
 function normalizeText(value) {
@@ -649,4 +643,7 @@ function renderAdminDashboard(data = {}) {
 </html>`;
 }
 
-module.exports = renderAdminDashboard;
+module.exports = {
+  renderAdminDashboard,
+  default: renderAdminDashboard,
+};

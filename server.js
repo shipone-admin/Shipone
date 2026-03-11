@@ -78,7 +78,8 @@ function normalizeAdminFilters(queryParams) {
   return {
     q: String(queryParams.q || "").trim(),
     status: String(queryParams.status || "").trim().toLowerCase(),
-    carrier: String(queryParams.carrier || "").trim().toLowerCase()
+    carrier: String(queryParams.carrier || "").trim().toLowerCase(),
+    health: String(queryParams.health || "").trim().toLowerCase()
   };
 }
 

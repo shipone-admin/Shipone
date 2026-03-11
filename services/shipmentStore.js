@@ -25,11 +25,6 @@ function normalizeBoolean(value) {
   return Boolean(value);
 }
 
-function normalizeRetryCount(value) {
-  const parsed = Number(value);
-  return Number.isNaN(parsed) ? 0 : parsed;
-}
-
 async function beginOrderProcessing(order) {
   const shippingAddress = buildShippingAddress(order);
   const orderNumber = normalizeOrderNumber(order);
@@ -296,6 +291,9 @@ async function readShipments() {
         carrier_last_event_at,
         carrier_event_count,
         carrier_last_synced_at,
+        carrier_next_sync_at,
+        carrier_sync_attempts,
+        carrier_last_sync_status,
         created_at,
         updated_at,
         completed_at,
@@ -341,6 +339,9 @@ async function findShipmentByOrderId(orderId) {
         carrier_last_event_at,
         carrier_event_count,
         carrier_last_synced_at,
+        carrier_next_sync_at,
+        carrier_sync_attempts,
+        carrier_last_sync_status,
         created_at,
         updated_at,
         completed_at,
@@ -356,7 +357,7 @@ async function findShipmentByOrderId(orderId) {
 }
 
 async function getRecentShipments(limit = 20) {
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
 
   const result = await query(
     `
@@ -390,6 +391,9 @@ async function getRecentShipments(limit = 20) {
         carrier_last_event_at,
         carrier_event_count,
         carrier_last_synced_at,
+        carrier_next_sync_at,
+        carrier_sync_attempts,
+        carrier_last_sync_status,
         created_at,
         updated_at,
         completed_at,

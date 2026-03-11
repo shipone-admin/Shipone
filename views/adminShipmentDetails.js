@@ -572,4 +572,7 @@ function renderAdminShipmentDetails(data = {}) {
 </html>`;
 }
 
-module.exports = renderAdminShipmentDetails;
+module.exports = {
+  renderAdminShipmentDetails,
+  default: renderAdminShipmentDetails,
+};

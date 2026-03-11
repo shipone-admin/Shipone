@@ -78,15 +78,22 @@ function renderRows(shipments) {
       const trackingUrl = shipment.tracking_number
         ? `/track/${encodeURIComponent(shipment.tracking_number)}`
         : null;
+      const detailsUrl = `/admin/shipment/${encodeURIComponent(
+        shipment.order_id
+      )}`;
       const carrierStatusText = escapeHtml(shipment.carrier_status_text || "-");
       const syncedAt = escapeHtml(formatDateSv(shipment.carrier_last_synced_at));
       const createdAt = escapeHtml(formatDateSv(shipment.created_at));
       const statusClass = getStatusClass(shipment.status);
 
       return `
-        <tr>
+        <tr class="clickable-row" onclick="window.location.href='${detailsUrl}'">
           <td>
-            <div class="primary">${orderName}</div>
+            <div class="primary">
+              <a class="order-link" href="${detailsUrl}" onclick="event.stopPropagation();">
+                ${orderName}
+              </a>
+            </div>
             <div class="secondary">${orderId}</div>
           </td>
           <td>${carrier}</td>
@@ -95,7 +102,7 @@ function renderRows(shipments) {
             <div class="primary mono">${trackingNumber}</div>
             ${
               trackingUrl
-                ? `<div class="secondary"><a href="${trackingUrl}" target="_blank" rel="noopener noreferrer">Öppna tracking</a></div>`
+                ? `<div class="secondary"><a href="${trackingUrl}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">Öppna tracking</a></div>`
                 : `<div class="secondary">-</div>`
             }
           </td>
@@ -104,11 +111,16 @@ function renderRows(shipments) {
           <td>${syncedAt}</td>
           <td>${createdAt}</td>
           <td>
-            <a class="action-link" href="/shipments/${encodeURIComponent(
-              shipment.order_id
-            )}" target="_blank" rel="noopener noreferrer">
-              JSON
-            </a>
+            <div class="row-actions">
+              <a class="action-link" href="${detailsUrl}" onclick="event.stopPropagation();">
+                Detaljer
+              </a>
+              <a class="action-link" href="/shipments/${encodeURIComponent(
+                shipment.order_id
+              )}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">
+                JSON
+              </a>
+            </div>
           </td>
         </tr>
       `;
@@ -310,7 +322,12 @@ function renderAdminDashboard({ shipments = [] } = {}) {
           font-size: 14px;
         }
 
-        tbody tr:hover {
+        .clickable-row {
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+
+        .clickable-row:hover {
           background: #fbfdff;
         }
 
@@ -326,11 +343,27 @@ function renderAdminDashboard({ shipments = [] } = {}) {
           line-height: 1.5;
         }
 
+        .order-link {
+          color: var(--text);
+          text-decoration: none;
+          font-weight: 800;
+        }
+
+        .order-link:hover {
+          color: var(--brand);
+        }
+
         .secondary a,
         .action-link {
           color: var(--brand);
           text-decoration: none;
           font-weight: 700;
+        }
+
+        .row-actions {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
         }
 
         .badge {

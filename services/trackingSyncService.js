@@ -108,7 +108,10 @@ async function syncPostNordTrackingForShipment(shipment) {
       carrier_status_text: refreshedShipment.carrier_status_text,
       carrier_last_event_at: refreshedShipment.carrier_last_event_at,
       carrier_event_count: refreshedShipment.carrier_event_count,
-      carrier_last_synced_at: refreshedShipment.carrier_last_synced_at
+      carrier_last_synced_at: refreshedShipment.carrier_last_synced_at,
+      carrier_next_sync_at: refreshedShipment.carrier_next_sync_at,
+      carrier_sync_attempts: refreshedShipment.carrier_sync_attempts,
+      carrier_last_sync_status: refreshedShipment.carrier_last_sync_status
     },
     carrierTracking: {
       success: carrierTracking.success,

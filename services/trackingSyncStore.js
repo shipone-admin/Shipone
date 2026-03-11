@@ -72,7 +72,10 @@ async function saveCarrierTrackingSnapshot(shipmentId, carrierTracking = {}) {
         carrier_event_count = $4,
         carrier_last_synced_at = NOW(),
         carrier_next_sync_at = $5,
-        carrier_sync_attempts = COALESCE(carrier_sync_attempts, 0) + 1,
+        carrier_sync_attempts = CASE
+          WHEN $6 = 'success' THEN 0
+          ELSE COALESCE(carrier_sync_attempts, 0) + 1
+        END,
         carrier_last_sync_status = $6,
         updated_at = NOW()
       WHERE id = $1

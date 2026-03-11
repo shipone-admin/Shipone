@@ -118,13 +118,14 @@ function buildStats(shipments) {
 function renderHealthPill(shipment) {
   const label = escapeHtml(shipment.healthLabel || "-");
   const reason = escapeHtml(shipment.healthReason || "");
+  const className = escapeHtml(shipment.healthClass || "health-neutral");
 
   return `
-    <div class="health-wrap">
-      <span class="health-pill ${escapeHtml(shipment.healthClass || "health-neutral")}" title="${reason}">
+    <div class="health-cell">
+      <span class="health-pill ${className}" title="${reason}">
         ${label}
       </span>
-      <div class="secondary">${reason}</div>
+      <div class="health-reason">${reason}</div>
     </div>
   `;
 }
@@ -133,7 +134,9 @@ function renderRows(shipments) {
   if (!Array.isArray(shipments) || shipments.length === 0) {
     return `
       <tr>
-        <td colspan="12" class="empty-cell">Inga shipments hittades för aktuellt filter.</td>
+        <td colspan="12" class="empty-cell">
+          Inga shipments hittades för aktuellt filter.
+        </td>
       </tr>
     `;
   }
@@ -161,42 +164,88 @@ function renderRows(shipments) {
         formatSyncStatus(shipment.carrier_last_sync_status)
       );
       const problemRowClass = isProblemShipment(shipment) ? "problem-row" : "";
+      const eventCount = escapeHtml(String(shipment.carrier_event_count ?? 0));
 
       return `
         <tr class="clickable-row ${problemRowClass}" onclick="window.location.href='${detailsUrl}'">
           <td>
-            <div class="primary">
-              <a class="order-link" href="${detailsUrl}" onclick="event.stopPropagation();">
-                ${orderName}
-              </a>
+            <div class="order-block">
+              <div class="primary">
+                <a class="order-link" href="${detailsUrl}" onclick="event.stopPropagation();">
+                  ${orderName}
+                </a>
+              </div>
+              <div class="secondary">Order ID: ${orderId}</div>
             </div>
-            <div class="secondary">${orderId}</div>
           </td>
-          <td>${renderHealthPill(shipment)}</td>
-          <td>${carrier}</td>
-          <td><span class="badge ${statusClass}">${status}</span></td>
+
           <td>
-            <div class="primary mono">${trackingNumber}</div>
-            ${
-              trackingUrl
-                ? `<div class="secondary"><a href="${trackingUrl}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">Öppna tracking</a></div>`
-                : `<div class="secondary">-</div>`
-            }
+            ${renderHealthPill(shipment)}
           </td>
-          <td>${carrierStatusText}</td>
-          <td><span class="sync-pill ${syncClass}">${syncStatusText}</span></td>
-          <td>${escapeHtml(String(shipment.carrier_event_count ?? 0))}</td>
-          <td>${syncedAt}</td>
-          <td>${nextSyncAt}</td>
-          <td>${createdAt}</td>
+
+          <td>
+            <span class="carrier-pill">${carrier}</span>
+          </td>
+
+          <td>
+            <span class="badge ${statusClass}">${status}</span>
+          </td>
+
+          <td>
+            <div class="tracking-block">
+              <div class="primary mono">${trackingNumber}</div>
+              ${
+                trackingUrl
+                  ? `<div class="secondary"><a href="${trackingUrl}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">Öppna tracking</a></div>`
+                  : `<div class="secondary">-</div>`
+              }
+            </div>
+          </td>
+
+          <td>
+            <div class="status-text">${carrierStatusText}</div>
+          </td>
+
+          <td>
+            <span class="sync-pill ${syncClass}">${syncStatusText}</span>
+          </td>
+
+          <td>
+            <div class="event-count">
+              ${eventCount}
+            </div>
+          </td>
+
+          <td>
+            <div class="date-block">
+              ${syncedAt}
+            </div>
+          </td>
+
+          <td>
+            <div class="date-block">
+              ${nextSyncAt}
+            </div>
+          </td>
+
+          <td>
+            <div class="date-block">
+              ${createdAt}
+            </div>
+          </td>
+
           <td>
             <div class="row-actions">
-              <a class="action-link" href="${detailsUrl}" onclick="event.stopPropagation();">
+              <a class="action-link action-link-primary" href="${detailsUrl}" onclick="event.stopPropagation();">
                 Detaljer
               </a>
-              <a class="action-link" href="/shipments/${encodeURIComponent(
-                shipment.order_id
-              )}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">
+              <a
+                class="action-link"
+                href="/shipments/${encodeURIComponent(shipment.order_id)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                onclick="event.stopPropagation();"
+              >
                 JSON
               </a>
             </div>
@@ -212,7 +261,6 @@ function renderAdminDashboard({
   filters = {}
 } = {}) {
   const enrichedShipments = enrichShipmentsWithHealth(shipments);
-
   const q = escapeHtml(filters.q || "");
   const status = String(filters.status || "");
   const carrier = String(filters.carrier || "");
@@ -227,13 +275,17 @@ function renderAdminDashboard({
       <title>ShipOne Admin Dashboard</title>
       <style>
         :root {
-          --bg: #f5f7fb;
-          --card: #ffffff;
-          --text: #14213d;
-          --muted: #64748b;
-          --line: #e2e8f0;
+          --bg: #f4f7fb;
+          --bg-accent: #eef4ff;
+          --card: rgba(255, 255, 255, 0.96);
+          --card-strong: #ffffff;
+          --text: #132238;
+          --muted: #6b7a90;
+          --line: #e4ebf5;
+          --line-strong: #d6e0ee;
           --brand: #2563eb;
           --brand-dark: #1d4ed8;
+          --brand-soft: #eff6ff;
           --success-bg: #ecfdf5;
           --success-text: #047857;
           --warning-bg: #fff7ed;
@@ -244,7 +296,12 @@ function renderAdminDashboard({
           --neutral-text: #475569;
           --info-bg: #eff6ff;
           --info-text: #1d4ed8;
-          --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+          --shadow-soft: 0 10px 30px rgba(15, 23, 42, 0.05);
+          --shadow-card: 0 18px 50px rgba(15, 23, 42, 0.08);
+          --radius-xl: 26px;
+          --radius-lg: 20px;
+          --radius-md: 16px;
+          --radius-sm: 12px;
         }
 
         * {
@@ -255,7 +312,8 @@ function renderAdminDashboard({
           margin: 0;
           padding: 0;
           font-family: Arial, sans-serif;
-          background: var(--bg);
+          background:
+            radial-gradient(circle at top left, #f8fbff 0%, #f4f7fb 42%, #eef3fa 100%);
           color: var(--text);
         }
 
@@ -264,7 +322,7 @@ function renderAdminDashboard({
         }
 
         .wrap {
-          max-width: 1480px;
+          max-width: 1520px;
           margin: 0 auto;
         }
 
@@ -294,66 +352,91 @@ function renderAdminDashboard({
         .pill-link {
           display: inline-flex;
           align-items: center;
+          gap: 8px;
           text-decoration: none;
-          background: #fff;
+          background: rgba(255, 255, 255, 0.92);
           border: 1px solid var(--line);
           color: var(--text);
           border-radius: 999px;
           padding: 10px 14px;
           font-size: 14px;
           font-weight: 700;
+          box-shadow: var(--shadow-soft);
+          transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        }
+
+        .pill-link:hover {
+          transform: translateY(-1px);
+          border-color: #cfe0ff;
+          color: var(--brand);
         }
 
         .hero {
-          background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-          border: 1px solid #ebf0f6;
-          border-radius: 24px;
-          box-shadow: var(--shadow);
-          padding: 28px;
-          margin-bottom: 20px;
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(250,252,255,0.98) 100%);
+          border: 1px solid #e8eef7;
+          border-radius: 28px;
+          box-shadow: var(--shadow-card);
+          padding: 30px;
+          margin-bottom: 22px;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .hero::before {
+          content: "";
+          position: absolute;
+          right: -60px;
+          top: -60px;
+          width: 220px;
+          height: 220px;
+          background: radial-gradient(circle, rgba(37, 99, 235, 0.10) 0%, rgba(37, 99, 235, 0) 72%);
+          pointer-events: none;
         }
 
         h1 {
           margin: 0 0 10px;
           font-size: 40px;
           line-height: 1.05;
+          letter-spacing: -0.02em;
         }
 
         .subtitle {
           margin: 0;
           color: var(--muted);
           font-size: 17px;
-          line-height: 1.6;
-          max-width: 760px;
+          line-height: 1.7;
+          max-width: 840px;
         }
 
         .stats {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 16px;
-          margin-top: 22px;
+          margin-top: 24px;
         }
 
         .stat-card {
-          background: var(--card);
+          background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
           border: 1px solid var(--line);
-          border-radius: 18px;
+          border-radius: 20px;
           padding: 18px;
+          box-shadow: var(--shadow-soft);
         }
 
         .stat-card.problem {
           border-color: #fecaca;
-          background: #fffafa;
+          background: linear-gradient(180deg, #fffefe 0%, #fff7f7 100%);
         }
 
         .stat-card.success {
-          border-color: #bbf7d0;
-          background: #f8fffb;
+          border-color: #ccefdc;
+          background: linear-gradient(180deg, #fbfffd 0%, #f4fff8 100%);
         }
 
         .stat-card.waiting {
-          border-color: #dbeafe;
-          background: #f8fbff;
+          border-color: #d7e6ff;
+          background: linear-gradient(180deg, #fbfdff 0%, #f4f9ff 100%);
         }
 
         .stat-label {
@@ -366,23 +449,26 @@ function renderAdminDashboard({
         }
 
         .stat-value {
-          font-size: 28px;
+          font-size: 30px;
           font-weight: 800;
+          letter-spacing: -0.02em;
         }
 
         .filters-card {
           background: var(--card);
-          border: 1px solid #ebf0f6;
-          border-radius: 24px;
-          box-shadow: var(--shadow);
-          padding: 22px;
-          margin-bottom: 20px;
+          border: 1px solid #e8eef7;
+          border-radius: var(--radius-xl);
+          box-shadow: var(--shadow-card);
+          padding: 24px;
+          margin-bottom: 22px;
+          backdrop-filter: blur(8px);
         }
 
         .filters-title {
           margin: 0 0 16px;
           font-size: 20px;
           font-weight: 800;
+          letter-spacing: -0.01em;
         }
 
         .filters-form {
@@ -410,10 +496,18 @@ function renderAdminDashboard({
           width: 100%;
           border: 1px solid #dbe3ee;
           border-radius: 14px;
-          padding: 12px 14px;
+          padding: 13px 14px;
           font-size: 14px;
           background: #fff;
           color: var(--text);
+          outline: none;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .input:focus,
+        .select:focus {
+          border-color: #bfd5ff;
+          box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
         }
 
         .filter-button,
@@ -428,12 +522,20 @@ function renderAdminDashboard({
           text-decoration: none;
           border: none;
           cursor: pointer;
-          min-height: 46px;
+          min-height: 48px;
+          white-space: nowrap;
+          transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .filter-button:hover,
+        .reset-button:hover {
+          transform: translateY(-1px);
         }
 
         .filter-button {
-          background: var(--brand);
+          background: linear-gradient(180deg, #2d6df6 0%, #2563eb 100%);
           color: white;
+          box-shadow: 0 12px 24px rgba(37, 99, 235, 0.18);
         }
 
         .reset-button {
@@ -443,7 +545,7 @@ function renderAdminDashboard({
         }
 
         .active-filters {
-          margin-top: 14px;
+          margin-top: 16px;
           display: flex;
           gap: 10px;
           flex-wrap: wrap;
@@ -463,30 +565,33 @@ function renderAdminDashboard({
 
         .table-card {
           background: var(--card);
-          border: 1px solid #ebf0f6;
-          border-radius: 24px;
-          box-shadow: var(--shadow);
+          border: 1px solid #e8eef7;
+          border-radius: 28px;
+          box-shadow: var(--shadow-card);
           overflow: hidden;
         }
 
         .table-header {
-          padding: 20px 24px;
+          padding: 22px 24px;
           border-bottom: 1px solid var(--line);
           display: flex;
           justify-content: space-between;
           gap: 12px;
           align-items: center;
           flex-wrap: wrap;
+          background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(249,251,255,0.98) 100%);
         }
 
         .table-title {
           font-size: 20px;
           font-weight: 800;
+          letter-spacing: -0.01em;
         }
 
         .table-subtitle {
           color: var(--muted);
           font-size: 14px;
+          margin-top: 4px;
         }
 
         .table-wrap {
@@ -495,8 +600,9 @@ function renderAdminDashboard({
 
         table {
           width: 100%;
-          border-collapse: collapse;
-          min-width: 1480px;
+          border-collapse: separate;
+          border-spacing: 0;
+          min-width: 1540px;
         }
 
         thead th {
@@ -505,33 +611,46 @@ function renderAdminDashboard({
           text-transform: uppercase;
           letter-spacing: 0.08em;
           color: var(--muted);
-          background: #f8fafc;
-          padding: 14px 18px;
+          background: #f8fbff;
+          padding: 16px 18px;
           border-bottom: 1px solid var(--line);
+          position: sticky;
+          top: 0;
+          z-index: 1;
         }
 
         tbody td {
-          padding: 16px 18px;
+          padding: 18px;
           border-bottom: 1px solid #edf2f7;
           vertical-align: top;
           font-size: 14px;
+          background: rgba(255, 255, 255, 0.88);
+        }
+
+        tbody tr:last-child td {
+          border-bottom: none;
         }
 
         .clickable-row {
           cursor: pointer;
-          transition: background 0.15s ease;
+          transition: background 0.16s ease, transform 0.16s ease;
         }
 
-        .clickable-row:hover {
+        .clickable-row:hover td {
           background: #fbfdff;
         }
 
-        .problem-row {
+        .problem-row td {
           background: #fffafa;
         }
 
-        .problem-row:hover {
-          background: #fff1f2;
+        .problem-row:hover td {
+          background: #fff4f4;
+        }
+
+        .order-block,
+        .tracking-block {
+          min-width: 0;
         }
 
         .primary {
@@ -542,7 +661,7 @@ function renderAdminDashboard({
         .secondary {
           color: var(--muted);
           font-size: 12px;
-          margin-top: 4px;
+          margin-top: 5px;
           line-height: 1.5;
         }
 
@@ -550,6 +669,7 @@ function renderAdminDashboard({
           color: var(--text);
           text-decoration: none;
           font-weight: 800;
+          font-size: 15px;
         }
 
         .order-link:hover {
@@ -563,10 +683,31 @@ function renderAdminDashboard({
           font-weight: 700;
         }
 
+        .secondary a:hover,
+        .action-link:hover {
+          color: var(--brand-dark);
+        }
+
         .row-actions {
           display: flex;
+          flex-direction: column;
           gap: 10px;
-          flex-wrap: wrap;
+          align-items: flex-start;
+        }
+
+        .action-link {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 78px;
+          padding: 8px 12px;
+          border-radius: 10px;
+          background: #f8fbff;
+          border: 1px solid #dbeafe;
+        }
+
+        .action-link-primary {
+          background: #eef4ff;
         }
 
         .badge {
@@ -598,6 +739,18 @@ function renderAdminDashboard({
           color: var(--neutral-text);
         }
 
+        .carrier-pill {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          padding: 8px 12px;
+          font-size: 12px;
+          font-weight: 800;
+          color: #29415f;
+          background: #f3f7fc;
+          border: 1px solid #dde7f4;
+        }
+
         .sync-pill {
           display: inline-flex;
           align-items: center;
@@ -622,8 +775,9 @@ function renderAdminDashboard({
           color: var(--neutral-text);
         }
 
-        .health-wrap {
-          min-width: 190px;
+        .health-cell {
+          min-width: 240px;
+          max-width: 280px;
         }
 
         .health-pill {
@@ -633,6 +787,13 @@ function renderAdminDashboard({
           padding: 8px 12px;
           font-size: 12px;
           font-weight: 800;
+        }
+
+        .health-reason {
+          color: var(--muted);
+          font-size: 12px;
+          line-height: 1.55;
+          margin-top: 8px;
         }
 
         .health-ok {
@@ -661,17 +822,45 @@ function renderAdminDashboard({
         }
 
         .mono {
-          font-family: monospace;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
           font-size: 13px;
+          letter-spacing: 0.01em;
+        }
+
+        .status-text {
+          max-width: 260px;
+          line-height: 1.55;
+          color: var(--text);
+        }
+
+        .event-count {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 38px;
+          padding: 8px 10px;
+          border-radius: 12px;
+          background: #f6f9fd;
+          border: 1px solid #e4edf7;
+          font-weight: 800;
+          color: #29415f;
+        }
+
+        .date-block {
+          color: var(--text);
+          line-height: 1.5;
+          white-space: nowrap;
         }
 
         .empty-cell {
           text-align: center;
           color: var(--muted);
-          padding: 28px;
+          padding: 34px;
+          font-size: 15px;
+          background: #fff;
         }
 
-        @media (max-width: 1100px) {
+        @media (max-width: 1180px) {
           .stats {
             grid-template-columns: 1fr 1fr;
           }
@@ -681,13 +870,31 @@ function renderAdminDashboard({
           }
 
           h1 {
-            font-size: 32px;
+            font-size: 34px;
           }
         }
 
-        @media (max-width: 700px) {
+        @media (max-width: 760px) {
+          body {
+            padding: 18px 10px 36px;
+          }
+
+          .hero,
+          .filters-card,
+          .table-card {
+            border-radius: 22px;
+          }
+
           .stats {
             grid-template-columns: 1fr;
+          }
+
+          h1 {
+            font-size: 30px;
+          }
+
+          .subtitle {
+            font-size: 15px;
           }
         }
       </style>
@@ -696,9 +903,14 @@ function renderAdminDashboard({
       <div class="wrap">
         <div class="topbar">
           <div class="brand">ShipOne Admin</div>
+
           <div class="top-links">
-            <a class="pill-link" href="/" target="_blank" rel="noopener noreferrer">Startsida</a>
-            <a class="pill-link" href="/shipments" target="_blank" rel="noopener noreferrer">Shipments JSON</a>
+            <a class="pill-link" href="/" target="_blank" rel="noopener noreferrer">
+              Startsida
+            </a>
+            <a class="pill-link" href="/shipments" target="_blank" rel="noopener noreferrer">
+              Shipments JSON
+            </a>
           </div>
         </div>
 

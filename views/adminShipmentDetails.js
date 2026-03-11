@@ -125,7 +125,36 @@ function renderTimeline(events) {
   `;
 }
 
-function renderAdminShipmentDetails({ shipment, events = [], carrierTracking = null }) {
+function renderSyncBanner(syncState) {
+  if (!syncState) {
+    return "";
+  }
+
+  if (syncState === "success") {
+    return `
+      <div class="sync-banner sync-banner-success">
+        Tracking sync genomfördes och shipmentet uppdaterades.
+      </div>
+    `;
+  }
+
+  if (syncState === "error") {
+    return `
+      <div class="sync-banner sync-banner-error">
+        Tracking sync misslyckades. Kontrollera carrier, trackingnummer och serverloggar.
+      </div>
+    `;
+  }
+
+  return "";
+}
+
+function renderAdminShipmentDetails({
+  shipment,
+  events = [],
+  carrierTracking = null,
+  syncState = ""
+}) {
   const orderId = escapeHtml(shipment.order_id || "-");
   const orderName = escapeHtml(shipment.order_name || "-");
   const carrier = escapeHtml(formatCarrierName(shipment.actual_carrier));
@@ -138,6 +167,9 @@ function renderAdminShipmentDetails({ shipment, events = [], carrierTracking = n
     ? `/track/${encodeURIComponent(shipment.tracking_number)}`
     : "";
   const adminJsonUrl = `/shipments/${encodeURIComponent(shipment.order_id)}`;
+  const manualSyncUrl = `/admin/shipment/${encodeURIComponent(
+    shipment.order_id
+  )}/sync`;
   const statusClass = getStatusClass(shipment.status);
   const liveStatusText = carrierTracking?.statusText
     ? escapeHtml(carrierTracking.statusText)
@@ -286,6 +318,26 @@ function renderAdminShipmentDetails({ shipment, events = [], carrierTracking = n
           color: var(--neutral-text);
         }
 
+        .sync-banner {
+          margin-top: 18px;
+          border-radius: 16px;
+          padding: 14px 16px;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .sync-banner-success {
+          background: var(--success-bg);
+          color: var(--success-text);
+          border: 1px solid #bbf7d0;
+        }
+
+        .sync-banner-error {
+          background: var(--danger-bg);
+          color: var(--danger-text);
+          border: 1px solid #fecaca;
+        }
+
         .action-links {
           display: flex;
           flex-wrap: wrap;
@@ -303,12 +355,19 @@ function renderAdminShipmentDetails({ shipment, events = [], carrierTracking = n
           padding: 12px 16px;
           font-weight: 700;
           font-size: 14px;
+          border: none;
+          cursor: pointer;
         }
 
         .action-button.secondary {
           background: #fff;
           color: var(--brand);
           border: 1px solid #cfe0ff;
+        }
+
+        .action-button.warning {
+          background: #f59e0b;
+          color: #fff;
         }
 
         .grid {
@@ -509,6 +568,8 @@ function renderAdminShipmentDetails({ shipment, events = [], carrierTracking = n
             <span class="badge badge-neutral">Order ID: ${orderId}</span>
           </div>
 
+          ${renderSyncBanner(syncState)}
+
           <div class="action-links">
             ${
               trackingPageUrl
@@ -521,6 +582,9 @@ function renderAdminShipmentDetails({ shipment, events = [], carrierTracking = n
                 : ""
             }
             <a class="action-button secondary" href="${adminJsonUrl}" target="_blank" rel="noopener noreferrer">Öppna JSON</a>
+            <form method="POST" action="${manualSyncUrl}" style="display:inline;">
+              <button class="action-button warning" type="submit">Synka tracking nu</button>
+            </form>
           </div>
         </div>
 

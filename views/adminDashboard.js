@@ -60,6 +60,17 @@ function formatSyncStatus(status) {
   return "-";
 }
 
+function formatHealthLabel(health) {
+  const normalized = String(health || "").toLowerCase();
+
+  if (normalized === "ok") return "OK";
+  if (normalized === "waiting") return "Väntar";
+  if (normalized === "warning") return "Varning";
+  if (normalized === "problem") return "Problem";
+
+  return "Alla";
+}
+
 function getStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
 
@@ -95,6 +106,16 @@ function hasUpcomingSync(shipment) {
   }
 
   return nextSyncDate.getTime() > Date.now();
+}
+
+function matchesHealthFilter(shipment, healthFilter) {
+  const normalizedFilter = String(healthFilter || "").toLowerCase();
+
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  return String(shipment?.health || "").toLowerCase() === normalizedFilter;
 }
 
 function buildStats(shipments) {
@@ -287,10 +308,16 @@ function renderAdminDashboard({
   filters = {}
 } = {}) {
   const enrichedShipments = enrichShipmentsWithHealth(shipments);
+  const health = String(filters.health || "").trim().toLowerCase();
+
+  const visibleShipments = enrichedShipments.filter((shipment) =>
+    matchesHealthFilter(shipment, health)
+  );
+
   const q = escapeHtml(filters.q || "");
   const status = String(filters.status || "");
   const carrier = String(filters.carrier || "");
-  const stats = buildStats(enrichedShipments);
+  const stats = buildStats(visibleShipments);
 
   return `
     <!DOCTYPE html>
@@ -499,7 +526,7 @@ function renderAdminDashboard({
 
         .filters-form {
           display: grid;
-          grid-template-columns: 2fr 1fr 1fr auto auto;
+          grid-template-columns: 2fr 1fr 1fr 1fr auto auto;
           gap: 12px;
           align-items: end;
         }
@@ -911,7 +938,7 @@ function renderAdminDashboard({
           background: #fff;
         }
 
-        @media (max-width: 1180px) {
+        @media (max-width: 1280px) {
           .stats {
             grid-template-columns: 1fr 1fr;
           }
@@ -1030,17 +1057,29 @@ function renderAdminDashboard({
               </select>
             </div>
 
+            <div class="field">
+              <label for="health">Health</label>
+              <select class="select" id="health" name="health">
+                <option value="" ${health === "" ? "selected" : ""}>Alla</option>
+                <option value="ok" ${health === "ok" ? "selected" : ""}>OK</option>
+                <option value="waiting" ${health === "waiting" ? "selected" : ""}>Väntar</option>
+                <option value="warning" ${health === "warning" ? "selected" : ""}>Varning</option>
+                <option value="problem" ${health === "problem" ? "selected" : ""}>Problem</option>
+              </select>
+            </div>
+
             <button class="filter-button" type="submit">Filtrera</button>
             <a class="reset-button" href="/admin">Rensa</a>
           </form>
 
           ${
-            filters.q || filters.status || filters.carrier
+            filters.q || filters.status || filters.carrier || health
               ? `
                 <div class="active-filters">
                   ${filters.q ? `<div class="filter-pill">Sök: ${escapeHtml(filters.q)}</div>` : ""}
                   ${filters.status ? `<div class="filter-pill">Status: ${escapeHtml(formatShipmentStatus(filters.status))}</div>` : ""}
                   ${filters.carrier ? `<div class="filter-pill">Carrier: ${escapeHtml(formatCarrierName(filters.carrier))}</div>` : ""}
+                  ${health ? `<div class="filter-pill">Health: ${escapeHtml(formatHealthLabel(health))}</div>` : ""}
                 </div>
               `
               : ""
@@ -1074,7 +1113,7 @@ function renderAdminDashboard({
                 </tr>
               </thead>
               <tbody>
-                ${renderRows(enrichedShipments)}
+                ${renderRows(visibleShipments)}
               </tbody>
             </table>
           </div>

@@ -40,6 +40,7 @@ const {
 } = require("./views/trackingPage");
 
 const { renderHomePage } = require("./views/homePage");
+const { renderAdminDashboard } = require("./views/adminDashboard");
 
 const app = express();
 app.use(express.json());
@@ -77,6 +78,34 @@ function requireCronSecret(req, res, next) {
 
 app.get("/", (req, res) => {
   return res.status(200).send(renderHomePage());
+});
+
+app.get("/admin", async (req, res) => {
+  try {
+    const shipments = await getRecentShipments(50);
+
+    return res.status(200).send(
+      renderAdminDashboard({
+        shipments
+      })
+    );
+  } catch (error) {
+    console.error("Admin dashboard failed:", error.message);
+
+    return res.status(500).send(`
+      <html lang="sv">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>ShipOne Admin</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; padding: 40px;">
+          <h1>ShipOne Admin</h1>
+          <p>Det gick inte att läsa admin dashboard just nu.</p>
+        </body>
+      </html>
+    `);
+  }
 });
 
 app.get("/shipments", async (req, res) => {
@@ -158,13 +187,10 @@ app.get("/sync-tracking/order/:orderId", async (req, res) => {
 
 app.get("/sync-tracking/batch/postnord", async (req, res) => {
   try {
-    const limit = req.query.limit || 20;
-    const includeDelivered =
-      String(req.query.includeDelivered || "false").toLowerCase() === "true";
-
     const result = await syncPostNordBatch({
-      limit,
-      includeDelivered
+      limit: req.query.limit || 20,
+      includeDelivered:
+        String(req.query.includeDelivered || "false").toLowerCase() === "true"
     });
 
     return res.json(result);
@@ -357,17 +383,18 @@ app.post("/webhooks/orders-create", async (req, res) => {
       selectedOption
     );
 
+    let fulfillmentResult = {
+      success: false
+    };
+
     let trackingNumber = null;
     let trackingUrl = null;
 
     if (shipmentResult.success && shipmentResult.data) {
-      trackingNumber =
-        shipmentResult.data.trackingNumber || null;
+      trackingNumber = shipmentResult.data.trackingNumber || null;
+      trackingUrl = shipmentResult.data.trackingUrl || null;
 
-      trackingUrl =
-        shipmentResult.data.trackingUrl || null;
-
-      await fulfillShopifyOrder(
+      fulfillmentResult = await fulfillShopifyOrder(
         order.id,
         trackingNumber,
         trackingUrl
@@ -375,9 +402,25 @@ app.post("/webhooks/orders-create", async (req, res) => {
     }
 
     await saveShipmentOutcome(order, {
+      shipone_choice: "SMART",
+      selected_option: selectedOption,
+      selected_carrier: selectedOption.carrier || null,
+      selected_service: selectedOption.name || null,
+      actual_carrier: shipmentResult.carrier || null,
+      fallback_used: shipmentResult.fallbackUsed || false,
+      fallback_from: shipmentResult.fallbackFrom || null,
       tracking_number: trackingNumber,
       tracking_url: trackingUrl,
-      shipment_success: shipmentResult.success
+      shipment_success: shipmentResult.success,
+      fulfillment_success: fulfillmentResult.success || false,
+      shipment_result: shipmentResult,
+      fulfillment_result: fulfillmentResult,
+      error:
+        shipmentResult.success
+          ? fulfillmentResult.success
+            ? null
+            : fulfillmentResult.error || "Shopify fulfillment failed"
+          : shipmentResult.error || "Shipment creation failed"
     });
 
     return res.sendStatus(200);

@@ -44,6 +44,7 @@ const { renderAdminShipmentDetails } = require("./views/adminShipmentDetails");
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 8080;
 
@@ -149,6 +150,28 @@ app.get("/admin", async (req, res) => {
   }
 });
 
+app.post("/admin/shipment/:orderId/sync", async (req, res) => {
+  try {
+    const result = await syncPostNordTrackingByOrderId(req.params.orderId);
+
+    if (!result.success) {
+      return res.redirect(
+        `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=error`
+      );
+    }
+
+    return res.redirect(
+      `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=success`
+    );
+  } catch (error) {
+    console.error("Manual admin sync failed:", error.message);
+
+    return res.redirect(
+      `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=error`
+    );
+  }
+});
+
 app.get("/admin/shipment/:orderId", async (req, res) => {
   try {
     const shipment = await findShipmentByOrderId(req.params.orderId);
@@ -199,7 +222,8 @@ app.get("/admin/shipment/:orderId", async (req, res) => {
       renderAdminShipmentDetails({
         shipment,
         events,
-        carrierTracking
+        carrierTracking,
+        syncState: String(req.query.sync || "")
       })
     );
   } catch (error) {

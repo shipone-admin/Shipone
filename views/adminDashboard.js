@@ -130,6 +130,45 @@ function renderHealthPill(shipment) {
   `;
 }
 
+function renderRowActions(shipment, detailsUrl) {
+  const orderId = encodeURIComponent(shipment.order_id || "");
+  const jsonUrl = `/shipments/${orderId}`;
+  const manualSyncUrl = `/admin/shipment/${orderId}/sync`;
+
+  return `
+    <div class="row-actions">
+      <a
+        class="action-link action-link-primary"
+        href="${detailsUrl}"
+        onclick="event.stopPropagation();"
+      >
+        Detaljer
+      </a>
+
+      <a
+        class="action-link"
+        href="${jsonUrl}"
+        target="_blank"
+        rel="noopener noreferrer"
+        onclick="event.stopPropagation();"
+      >
+        JSON
+      </a>
+
+      <form
+        class="inline-form"
+        method="POST"
+        action="${manualSyncUrl}"
+        onsubmit="event.stopPropagation();"
+      >
+        <button class="sync-action-button" type="submit">
+          Sync
+        </button>
+      </form>
+    </div>
+  `;
+}
+
 function renderRows(shipments) {
   if (!Array.isArray(shipments) || shipments.length === 0) {
     return `
@@ -235,20 +274,7 @@ function renderRows(shipments) {
           </td>
 
           <td>
-            <div class="row-actions">
-              <a class="action-link action-link-primary" href="${detailsUrl}" onclick="event.stopPropagation();">
-                Detaljer
-              </a>
-              <a
-                class="action-link"
-                href="/shipments/${encodeURIComponent(shipment.order_id)}"
-                target="_blank"
-                rel="noopener noreferrer"
-                onclick="event.stopPropagation();"
-              >
-                JSON
-              </a>
-            </div>
+            ${renderRowActions(shipment, detailsUrl)}
           </td>
         </tr>
       `;
@@ -602,7 +628,7 @@ function renderAdminDashboard({
           width: 100%;
           border-collapse: separate;
           border-spacing: 0;
-          min-width: 1540px;
+          min-width: 1600px;
         }
 
         thead th {
@@ -708,6 +734,31 @@ function renderAdminDashboard({
 
         .action-link-primary {
           background: #eef4ff;
+        }
+
+        .inline-form {
+          margin: 0;
+          padding: 0;
+        }
+
+        .sync-action-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 78px;
+          padding: 8px 12px;
+          border-radius: 10px;
+          border: 1px solid #fde68a;
+          background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+          color: #ffffff;
+          font-size: 13px;
+          font-weight: 800;
+          cursor: pointer;
+          box-shadow: 0 8px 18px rgba(245, 158, 11, 0.18);
+        }
+
+        .sync-action-button:hover {
+          filter: brightness(0.98);
         }
 
         .badge {

@@ -41,6 +41,7 @@ const {
 
 const { renderHomePage } = require("./views/homePage");
 const { renderAdminDashboard } = require("./views/adminDashboard");
+const { renderAdminShipmentDetails } = require("./views/adminShipmentDetails");
 
 const app = express();
 app.use(express.json());
@@ -102,6 +103,52 @@ app.get("/admin", async (req, res) => {
         <body style="font-family: Arial, sans-serif; padding: 40px;">
           <h1>ShipOne Admin</h1>
           <p>Det gick inte att läsa admin dashboard just nu.</p>
+        </body>
+      </html>
+    `);
+  }
+});
+
+app.get("/admin/shipment/:orderId", async (req, res) => {
+  try {
+    const shipment = await findShipmentByOrderId(req.params.orderId);
+
+    if (!shipment) {
+      return res.status(404).send(`
+        <html lang="sv">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>ShipOne Admin</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; padding: 40px;">
+            <h1>ShipOne Admin</h1>
+            <p>Shipment hittades inte.</p>
+            <p><a href="/admin">Tillbaka till admin</a></p>
+          </body>
+        </html>
+      `);
+    }
+
+    return res.status(200).send(
+      renderAdminShipmentDetails({
+        shipment
+      })
+    );
+  } catch (error) {
+    console.error("Admin shipment details failed:", error.message);
+
+    return res.status(500).send(`
+      <html lang="sv">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>ShipOne Admin</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; padding: 40px;">
+          <h1>ShipOne Admin</h1>
+          <p>Det gick inte att läsa shipmentdetaljer just nu.</p>
+          <p><a href="/admin">Tillbaka till admin</a></p>
         </body>
       </html>
     `);

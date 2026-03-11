@@ -1,33 +1,37 @@
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function toDate(value) {
   if (!value) return null;
 
-  const date = value instanceof Date ? value : new Date(value);
+  try {
+    const date = value instanceof Date ? value : new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+
+    return date;
+  } catch (error) {
     return null;
   }
-
-  return date;
-}
-
-function diffMinutes(fromDate, toDate) {
-  if (!fromDate || !toDate) return null;
-  return Math.floor((toDate.getTime() - fromDate.getTime()) / 60000);
 }
 
 function diffHours(fromDate, toDate) {
-  if (!fromDate || !toDate) return null;
-  return Math.floor((toDate.getTime() - fromDate.getTime()) / 3600000);
-}
+  if (!fromDate || !toDate) {
+    return null;
+  }
 
-function normalizeText(value) {
-  return String(value || "").trim().toLowerCase();
+  return Math.floor((toDate.getTime() - fromDate.getTime()) / 3600000);
 }
 
 function isWaitingCarrierText(text) {
   const normalized = normalizeText(text);
 
-  if (!normalized) return false;
+  if (!normalized) {
+    return false;
+  }
 
   return [
     "inväntar försändelse",
@@ -36,164 +40,121 @@ function isWaitingCarrierText(text) {
     "shipment information received",
     "sender has booked shipment",
     "electronic shipment information received",
-    "transportör inväntar gods",
+    "transportör inväntar gods"
   ].includes(normalized);
 }
 
-function buildHealthResult({
-  level,
-  label,
-  reason,
-  code,
-  colorClass,
-  bgClass,
-  textClass,
-}) {
-  return {
-    health: level,
-    healthLabel: label,
-    healthReason: reason,
-    healthCode: code,
-    healthColorClass: colorClass,
-    healthBgClass: bgClass,
-    healthTextClass: textClass,
-  };
+function getHealthBadgeClass(health) {
+  if (health === "ok") return "health-ok";
+  if (health === "waiting") return "health-waiting";
+  if (health === "warning") return "health-warning";
+  if (health === "problem") return "health-problem";
+  return "health-neutral";
 }
 
 function getShipmentHealth(shipment) {
   const now = new Date();
 
   const trackingNumber = String(shipment?.tracking_number || "").trim();
-  const carrier = String(shipment?.carrier || "").trim();
+  const carrier = String(shipment?.actual_carrier || "").trim();
+  const shipmentStatus = normalizeText(shipment?.status);
+  const syncStatus = normalizeText(shipment?.carrier_last_sync_status);
   const carrierStatusText = String(shipment?.carrier_status_text || "").trim();
 
-  const createdAt = toDate(shipment?.created_at);
-  const updatedAt = toDate(shipment?.updated_at);
-  const syncedAt = toDate(
-    shipment?.carrier_last_synced_at ||
-      shipment?.last_synced_at ||
-      shipment?.synced_at
-  );
-  const nextSyncAt = toDate(
-    shipment?.carrier_next_sync_at ||
-      shipment?.next_sync_at
-  );
+  const carrierLastSyncedAt = toDate(shipment?.carrier_last_synced_at);
+  const carrierNextSyncAt = toDate(shipment?.carrier_next_sync_at);
 
-  const syncAttempts = Number(shipment?.carrier_sync_attempts || 0);
-  const syncStatus = normalizeText(
-    shipment?.carrier_last_sync_status ||
-      shipment?.sync_status
-  );
-
-  const hoursSinceSync = diffHours(syncedAt, now);
-  const hoursSinceUpdate = diffHours(updatedAt || createdAt, now);
-  const minutesUntilNextSync = diffMinutes(now, nextSyncAt);
+  const hoursSinceLastSync = diffHours(carrierLastSyncedAt, now);
+  const carrierEventCount = Number(shipment?.carrier_event_count ?? 0);
+  const syncAttempts = Number(shipment?.carrier_sync_attempts ?? 0);
 
   if (!trackingNumber) {
-    return buildHealthResult({
-      level: "problem",
-      label: "Problem",
-      reason: "Trackingnummer saknas på shipment.",
-      code: "missing_tracking_number",
-      colorClass: "health-problem",
-      bgClass: "background:#fee2e2;",
-      textClass: "color:#991b1b;",
-    });
+    return {
+      health: "problem",
+      healthLabel: "Problem",
+      healthCode: "missing_tracking_number",
+      healthReason: "Trackingnummer saknas på shipment.",
+      healthClass: getHealthBadgeClass("problem")
+    };
   }
 
-  if (!carrier) {
-    return buildHealthResult({
-      level: "problem",
-      label: "Problem",
-      reason: "Carrier saknas på shipment.",
-      code: "missing_carrier",
-      colorClass: "health-problem",
-      bgClass: "background:#fee2e2;",
-      textClass: "color:#991b1b;",
-    });
-  }
-
-  if (syncStatus === "error" || syncStatus === "failed" || syncStatus === "failure") {
-    return buildHealthResult({
-      level: "problem",
-      label: "Problem",
-      reason: "Senaste tracking-sync misslyckades.",
-      code: "sync_failed",
-      colorClass: "health-problem",
-      bgClass: "background:#fee2e2;",
-      textClass: "color:#991b1b;",
-    });
-  }
-
-  if (syncAttempts >= 8) {
-    return buildHealthResult({
-      level: "warning",
-      label: "Varning",
-      reason: `Många syncförsök registrerade (${syncAttempts}).`,
-      code: "high_sync_attempts",
-      colorClass: "health-warning",
-      bgClass: "background:#fef3c7;",
-      textClass: "color:#92400e;",
-    });
-  }
-
-  if (nextSyncAt && minutesUntilNextSync !== null && minutesUntilNextSync < -30) {
-    return buildHealthResult({
-      level: "warning",
-      label: "Varning",
-      reason: "Nästa sync-tid ligger mer än 30 minuter i det förflutna.",
-      code: "overdue_next_sync",
-      colorClass: "health-warning",
-      bgClass: "background:#fef3c7;",
-      textClass: "color:#92400e;",
-    });
+  if (shipmentStatus === "failed" || syncStatus === "failed") {
+    return {
+      health: "problem",
+      healthLabel: "Problem",
+      healthCode: "failed_state",
+      healthReason: "Shipment eller tracking-sync är markerad som misslyckad.",
+      healthClass: getHealthBadgeClass("problem")
+    };
   }
 
   if (isWaitingCarrierText(carrierStatusText)) {
-    return buildHealthResult({
-      level: "waiting",
-      label: "Väntar",
-      reason: "Transportören har ännu inte registrerat progression i flödet.",
-      code: "awaiting_progress",
-      colorClass: "health-waiting",
-      bgClass: "background:#dbeafe;",
-      textClass: "color:#1d4ed8;",
-    });
+    return {
+      health: "waiting",
+      healthLabel: "Väntar",
+      healthCode: "awaiting_progress",
+      healthReason: "Transportören har ännu inte registrerat progression i flödet.",
+      healthClass: getHealthBadgeClass("waiting")
+    };
   }
 
-  if (!syncedAt && hoursSinceUpdate !== null && hoursSinceUpdate >= 1) {
-    return buildHealthResult({
-      level: "warning",
-      label: "Varning",
-      reason: "Shipment finns men har ännu inte någon registrerad tracking-sync.",
-      code: "never_synced",
-      colorClass: "health-warning",
-      bgClass: "background:#fef3c7;",
-      textClass: "color:#92400e;",
-    });
+  if (!carrier && syncStatus === "success") {
+    return {
+      health: "warning",
+      healthLabel: "Varning",
+      healthCode: "missing_actual_carrier",
+      healthReason: "actual_carrier saknas trots att shipmentet i övrigt verkar fungera.",
+      healthClass: getHealthBadgeClass("warning")
+    };
   }
 
-  if (hoursSinceSync !== null && hoursSinceSync >= 24) {
-    return buildHealthResult({
-      level: "warning",
-      label: "Varning",
-      reason: `Shipment har inte synkats på ${hoursSinceSync} timmar.`,
-      code: "stale_sync",
-      colorClass: "health-warning",
-      bgClass: "background:#fef3c7;",
-      textClass: "color:#92400e;",
-    });
+  if (carrierNextSyncAt && carrierNextSyncAt.getTime() < now.getTime() - 30 * 60 * 1000) {
+    return {
+      health: "warning",
+      healthLabel: "Varning",
+      healthCode: "next_sync_overdue",
+      healthReason: "Nästa sync-tid ligger mer än 30 minuter i det förflutna.",
+      healthClass: getHealthBadgeClass("warning")
+    };
   }
 
-  return buildHealthResult({
-    level: "ok",
-    label: "OK",
-    reason: "Shipment ser frisk ut och senaste sync-status är normal.",
-    code: "healthy",
-    colorClass: "health-ok",
-    bgClass: "background:#dcfce7;",
-    textClass: "color:#166534;",
-  });
+  if (syncAttempts >= 8 && syncStatus !== "success") {
+    return {
+      health: "warning",
+      healthLabel: "Varning",
+      healthCode: "high_sync_attempts",
+      healthReason: `Många syncförsök registrerade (${syncAttempts}).`,
+      healthClass: getHealthBadgeClass("warning")
+    };
+  }
+
+  if (carrierLastSyncedAt && hoursSinceLastSync !== null && hoursSinceLastSync >= 24) {
+    return {
+      health: "warning",
+      healthLabel: "Varning",
+      healthCode: "stale_sync",
+      healthReason: `Shipmentet har inte synkats på ${hoursSinceLastSync} timmar.`,
+      healthClass: getHealthBadgeClass("warning")
+    };
+  }
+
+  if (syncStatus === "success" && carrierEventCount === 0 && shipmentStatus === "processing") {
+    return {
+      health: "waiting",
+      healthLabel: "Väntar",
+      healthCode: "processing_without_events",
+      healthReason: "Shipmentet behandlas men saknar ännu registrerade carrier-events.",
+      healthClass: getHealthBadgeClass("waiting")
+    };
+  }
+
+  return {
+    health: "ok",
+    healthLabel: "OK",
+    healthCode: "healthy",
+    healthReason: "Shipmentet ser friskt ut och senaste sync-status är normal.",
+    healthClass: getHealthBadgeClass("ok")
+  };
 }
 
 function enrichShipmentWithHealth(shipment) {
@@ -203,7 +164,7 @@ function enrichShipmentWithHealth(shipment) {
 
   return {
     ...shipment,
-    ...getShipmentHealth(shipment),
+    ...getShipmentHealth(shipment)
   };
 }
 
@@ -218,5 +179,5 @@ function enrichShipmentsWithHealth(shipments) {
 module.exports = {
   getShipmentHealth,
   enrichShipmentWithHealth,
-  enrichShipmentsWithHealth,
+  enrichShipmentsWithHealth
 };

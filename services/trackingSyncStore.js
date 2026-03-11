@@ -1,6 +1,7 @@
 const { query } = require("./db");
+const { calculateNextSync } = require("./syncSchedule");
 
-function toIsoOrNull(value) {
+function normalizeDateValue(value) {
   if (!value) return null;
 
   const date = new Date(value);
@@ -12,30 +13,14 @@ function toIsoOrNull(value) {
   return date.toISOString();
 }
 
-function getLatestEventTime(events) {
-  if (!Array.isArray(events) || events.length === 0) {
-    return null;
-  }
-
-  const timestamps = events
-    .map((event) => toIsoOrNull(event?.occurredAt))
-    .filter(Boolean)
-    .sort();
-
-  return timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
-}
-
-async function saveCarrierTrackingSnapshot(shipmentId, carrierTracking) {
-  if (!shipmentId || !carrierTracking) {
-    return null;
-  }
-
+async function saveCarrierTrackingSnapshot(shipmentId, carrierTracking = {}) {
   const statusText = carrierTracking.statusText || null;
-  const eventCount = Array.isArray(carrierTracking.events)
-    ? carrierTracking.events.length
-    : 0;
-  const latestEventAt = getLatestEventTime(carrierTracking.events);
-  const syncedAt = new Date().toISOString();
+  const latestEventAt = normalizeDateValue(carrierTracking.latestEventAt);
+  const eventCount = Number(carrierTracking.eventCount || 0);
+  const syncSuccess = Boolean(carrierTracking.success);
+  const nextSyncAtDate = calculateNextSync(statusText);
+  const nextSyncAt = nextSyncAtDate ? nextSyncAtDate.toISOString() : null;
+  const lastSyncStatus = syncSuccess ? "success" : "failed";
 
   const result = await query(
     `
@@ -44,7 +29,10 @@ async function saveCarrierTrackingSnapshot(shipmentId, carrierTracking) {
         carrier_status_text = $2,
         carrier_last_event_at = $3,
         carrier_event_count = $4,
-        carrier_last_synced_at = $5,
+        carrier_last_synced_at = NOW(),
+        carrier_next_sync_at = $5,
+        carrier_sync_attempts = COALESCE(carrier_sync_attempts, 0) + 1,
+        carrier_last_sync_status = $6,
         updated_at = NOW()
       WHERE id = $1
       RETURNING
@@ -54,9 +42,19 @@ async function saveCarrierTrackingSnapshot(shipmentId, carrierTracking) {
         carrier_status_text,
         carrier_last_event_at,
         carrier_event_count,
-        carrier_last_synced_at
+        carrier_last_synced_at,
+        carrier_next_sync_at,
+        carrier_sync_attempts,
+        carrier_last_sync_status
     `,
-    [shipmentId, statusText, latestEventAt, eventCount, syncedAt]
+    [
+      shipmentId,
+      statusText,
+      latestEventAt,
+      eventCount,
+      nextSyncAt,
+      lastSyncStatus
+    ]
   );
 
   return result.rows[0] || null;

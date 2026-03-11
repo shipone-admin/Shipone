@@ -59,11 +59,22 @@ function getStatusClass(status) {
   return "badge-neutral";
 }
 
+function buildAdminUrl({ q = "", status = "", carrier = "" } = {}) {
+  const params = new URLSearchParams();
+
+  if (q) params.set("q", q);
+  if (status) params.set("status", status);
+  if (carrier) params.set("carrier", carrier);
+
+  const queryString = params.toString();
+  return queryString ? `/admin?${queryString}` : "/admin";
+}
+
 function renderRows(shipments) {
   if (!Array.isArray(shipments) || shipments.length === 0) {
     return `
       <tr>
-        <td colspan="9" class="empty-cell">Inga shipments hittades.</td>
+        <td colspan="9" class="empty-cell">Inga shipments hittades för aktuellt filter.</td>
       </tr>
     `;
   }
@@ -128,8 +139,14 @@ function renderRows(shipments) {
     .join("");
 }
 
-function renderAdminDashboard({ shipments = [] } = {}) {
+function renderAdminDashboard({
+  shipments = [],
+  filters = {}
+} = {}) {
   const shipmentCount = Array.isArray(shipments) ? shipments.length : 0;
+  const q = escapeHtml(filters.q || "");
+  const status = String(filters.status || "");
+  const carrier = String(filters.carrier || "");
 
   return `
     <!DOCTYPE html>
@@ -264,6 +281,97 @@ function renderAdminDashboard({ shipments = [] } = {}) {
         .stat-value {
           font-size: 28px;
           font-weight: 800;
+        }
+
+        .filters-card {
+          background: var(--card);
+          border: 1px solid #ebf0f6;
+          border-radius: 24px;
+          box-shadow: var(--shadow);
+          padding: 22px;
+          margin-bottom: 20px;
+        }
+
+        .filters-title {
+          margin: 0 0 16px;
+          font-size: 20px;
+          font-weight: 800;
+        }
+
+        .filters-form {
+          display: grid;
+          grid-template-columns: 2fr 1fr 1fr auto auto;
+          gap: 12px;
+          align-items: end;
+        }
+
+        .field {
+          display: grid;
+          gap: 8px;
+        }
+
+        .field label {
+          font-size: 12px;
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 700;
+        }
+
+        .input,
+        .select {
+          width: 100%;
+          border: 1px solid #dbe3ee;
+          border-radius: 14px;
+          padding: 12px 14px;
+          font-size: 14px;
+          background: #fff;
+          color: var(--text);
+        }
+
+        .filter-button,
+        .reset-button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 14px;
+          padding: 12px 16px;
+          font-size: 14px;
+          font-weight: 700;
+          text-decoration: none;
+          border: none;
+          cursor: pointer;
+          min-height: 46px;
+        }
+
+        .filter-button {
+          background: var(--brand);
+          color: white;
+        }
+
+        .reset-button {
+          background: #fff;
+          color: var(--brand);
+          border: 1px solid #cfe0ff;
+        }
+
+        .active-filters {
+          margin-top: 14px;
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .filter-pill {
+          display: inline-flex;
+          align-items: center;
+          background: #eef4ff;
+          color: var(--brand-dark);
+          border: 1px solid #dbeafe;
+          border-radius: 999px;
+          padding: 8px 12px;
+          font-size: 12px;
+          font-weight: 700;
         }
 
         .table-card {
@@ -406,8 +514,12 @@ function renderAdminDashboard({ shipments = [] } = {}) {
           padding: 28px;
         }
 
-        @media (max-width: 900px) {
+        @media (max-width: 980px) {
           .stats {
+            grid-template-columns: 1fr;
+          }
+
+          .filters-form {
             grid-template-columns: 1fr;
           }
 
@@ -435,13 +547,15 @@ function renderAdminDashboard({ shipments = [] } = {}) {
 
           <div class="stats">
             <div class="stat-card">
-              <div class="stat-label">Totala shipments på sidan</div>
+              <div class="stat-label">Matchande shipments</div>
               <div class="stat-value">${shipmentCount}</div>
             </div>
 
             <div class="stat-card">
               <div class="stat-label">Aktiv carrier just nu</div>
-              <div class="stat-value">PostNord</div>
+              <div class="stat-value">${
+                carrier ? escapeHtml(formatCarrierName(carrier)) : "Alla"
+              }</div>
             </div>
 
             <div class="stat-card">
@@ -449,6 +563,59 @@ function renderAdminDashboard({ shipments = [] } = {}) {
               <div class="stat-value">Live</div>
             </div>
           </div>
+        </div>
+
+        <div class="filters-card">
+          <h2 class="filters-title">Filter och sökning</h2>
+
+          <form class="filters-form" method="GET" action="/admin">
+            <div class="field">
+              <label for="q">Sök</label>
+              <input
+                class="input"
+                id="q"
+                name="q"
+                type="text"
+                value="${q}"
+                placeholder="Order, order-id eller trackingnummer"
+              />
+            </div>
+
+            <div class="field">
+              <label for="status">Status</label>
+              <select class="select" id="status" name="status">
+                <option value="" ${status === "" ? "selected" : ""}>Alla</option>
+                <option value="completed" ${status === "completed" ? "selected" : ""}>Slutförd</option>
+                <option value="processing" ${status === "processing" ? "selected" : ""}>Behandlas</option>
+                <option value="failed" ${status === "failed" ? "selected" : ""}>Misslyckad</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="carrier">Carrier</label>
+              <select class="select" id="carrier" name="carrier">
+                <option value="" ${carrier === "" ? "selected" : ""}>Alla</option>
+                <option value="postnord" ${carrier === "postnord" ? "selected" : ""}>PostNord</option>
+                <option value="dhl" ${carrier === "dhl" ? "selected" : ""}>DHL</option>
+                <option value="budbee" ${carrier === "budbee" ? "selected" : ""}>Budbee</option>
+              </select>
+            </div>
+
+            <button class="filter-button" type="submit">Filtrera</button>
+            <a class="reset-button" href="/admin">Rensa</a>
+          </form>
+
+          ${
+            filters.q || filters.status || filters.carrier
+              ? `
+                <div class="active-filters">
+                  ${filters.q ? `<div class="filter-pill">Sök: ${escapeHtml(filters.q)}</div>` : ""}
+                  ${filters.status ? `<div class="filter-pill">Status: ${escapeHtml(formatShipmentStatus(filters.status))}</div>` : ""}
+                  ${filters.carrier ? `<div class="filter-pill">Carrier: ${escapeHtml(formatCarrierName(filters.carrier))}</div>` : ""}
+                </div>
+              `
+              : ""
+          }
         </div>
 
         <div class="table-card">

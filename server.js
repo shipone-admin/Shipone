@@ -28,7 +28,6 @@ const {
   beginOrderProcessing,
   failOrderProcessing,
   saveShipmentOutcome,
-  readShipments,
   findShipmentByOrderId,
   getRecentShipments
 } = require("./services/shipmentStore");
@@ -62,10 +61,7 @@ function getBearerToken(req) {
 function requireCronSecret(req, res, next) {
   const configuredSecret = String(process.env.CRON_SECRET || "").trim();
 
-  const providedSecret =
-    getBearerToken(req) ||
-    req.query.token ||
-    "";
+  const providedSecret = getBearerToken(req) || req.query.token || "";
 
   if (!configuredSecret || providedSecret !== configuredSecret) {
     return res.status(401).json({
@@ -130,9 +126,36 @@ app.get("/admin/shipment/:orderId", async (req, res) => {
       `);
     }
 
+    let carrierTracking = {
+      success: false,
+      skipped: true,
+      reason: "Live carrier tracking is only enabled for PostNord shipments",
+      events: [],
+      statusText: shipment.carrier_status_text || null,
+      eventCount: shipment.carrier_event_count || 0,
+      latestEventAt: shipment.carrier_last_event_at || null
+    };
+
+    if (String(shipment.actual_carrier || "").toLowerCase() === "postnord") {
+      carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
+
+      try {
+        await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
+      } catch (syncError) {
+        console.error("Admin details snapshot save failed:", syncError.message);
+      }
+    }
+
+    const events = buildTrackingEvents({
+      shipment,
+      externalEvents: carrierTracking.events || []
+    });
+
     return res.status(200).send(
       renderAdminShipmentDetails({
-        shipment
+        shipment,
+        events,
+        carrierTracking
       })
     );
   } catch (error) {
@@ -287,46 +310,42 @@ app.get("/jobs/sync-postnord-active", requireCronSecret, async (req, res) => {
   }
 });
 
-app.get(
-  "/admin/db/migrate-rate-limit",
-  requireCronSecret,
-  async (req, res) => {
-    try {
-      await query(`
-        ALTER TABLE shipments
-        ADD COLUMN IF NOT EXISTS carrier_next_sync_at TIMESTAMP;
-      `);
+app.get("/admin/db/migrate-rate-limit", requireCronSecret, async (req, res) => {
+  try {
+    await query(`
+      ALTER TABLE shipments
+      ADD COLUMN IF NOT EXISTS carrier_next_sync_at TIMESTAMP;
+    `);
 
-      await query(`
-        ALTER TABLE shipments
-        ADD COLUMN IF NOT EXISTS carrier_sync_attempts INTEGER DEFAULT 0;
-      `);
+    await query(`
+      ALTER TABLE shipments
+      ADD COLUMN IF NOT EXISTS carrier_sync_attempts INTEGER DEFAULT 0;
+    `);
 
-      await query(`
-        ALTER TABLE shipments
-        ADD COLUMN IF NOT EXISTS carrier_last_sync_status TEXT;
-      `);
+    await query(`
+      ALTER TABLE shipments
+      ADD COLUMN IF NOT EXISTS carrier_last_sync_status TEXT;
+    `);
 
-      await query(`
-        UPDATE shipments
-        SET carrier_next_sync_at = NOW()
-        WHERE carrier_next_sync_at IS NULL;
-      `);
+    await query(`
+      UPDATE shipments
+      SET carrier_next_sync_at = NOW()
+      WHERE carrier_next_sync_at IS NULL;
+    `);
 
-      return res.json({
-        success: true,
-        message: "Rate limit migration completed"
-      });
-    } catch (error) {
-      console.error("Migration failed:", error.message);
+    return res.json({
+      success: true,
+      message: "Rate limit migration completed"
+    });
+  } catch (error) {
+    console.error("Migration failed:", error.message);
 
-      return res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    }
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
-);
+});
 
 app.get("/track/:trackingNumber", async (req, res) => {
   try {
@@ -348,17 +367,10 @@ app.get("/track/:trackingNumber", async (req, res) => {
       statusText: null
     };
 
-    if (
-      String(shipment.actual_carrier || "").toLowerCase() === "postnord"
-    ) {
-      carrierTracking = await fetchPostNordTracking(
-        shipment.tracking_number
-      );
+    if (String(shipment.actual_carrier || "").toLowerCase() === "postnord") {
+      carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
 
-      await saveCarrierTrackingSnapshot(
-        shipment.id,
-        carrierTracking
-      );
+      await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
     }
 
     const displayStatus = getDisplayStatus({
@@ -411,10 +423,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
 
     const shippingOptions = await collectRates(order);
 
-    const selectedOption = chooseBestOption(
-      shippingOptions,
-      "SMART"
-    );
+    const selectedOption = chooseBestOption(shippingOptions, "SMART");
 
     if (!selectedOption) {
       await failOrderProcessing(order.id, {
@@ -425,10 +434,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    const shipmentResult = await createShipment(
-      order,
-      selectedOption
-    );
+    const shipmentResult = await createShipment(order, selectedOption);
 
     let fulfillmentResult = {
       success: false

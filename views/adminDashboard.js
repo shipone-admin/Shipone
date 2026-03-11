@@ -49,6 +49,15 @@ function formatShipmentStatus(status) {
   return status || "-";
 }
 
+function formatSyncStatus(status) {
+  const normalized = String(status || "").toLowerCase();
+
+  if (normalized === "success") return "OK";
+  if (normalized === "failed") return "Fel";
+
+  return "-";
+}
+
 function getStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
 
@@ -59,22 +68,59 @@ function getStatusClass(status) {
   return "badge-neutral";
 }
 
-function buildAdminUrl({ q = "", status = "", carrier = "" } = {}) {
-  const params = new URLSearchParams();
+function getSyncClass(status) {
+  const normalized = String(status || "").toLowerCase();
 
-  if (q) params.set("q", q);
-  if (status) params.set("status", status);
-  if (carrier) params.set("carrier", carrier);
+  if (normalized === "success") return "sync-ok";
+  if (normalized === "failed") return "sync-failed";
 
-  const queryString = params.toString();
-  return queryString ? `/admin?${queryString}` : "/admin";
+  return "sync-neutral";
+}
+
+function isProblemShipment(shipment) {
+  const shipmentStatus = String(shipment?.status || "").toLowerCase();
+  const syncStatus = String(shipment?.carrier_last_sync_status || "").toLowerCase();
+
+  return shipmentStatus === "failed" || syncStatus === "failed";
+}
+
+function hasUpcomingSync(shipment) {
+  if (!shipment?.carrier_next_sync_at) {
+    return false;
+  }
+
+  const nextSyncDate = new Date(shipment.carrier_next_sync_at);
+
+  if (Number.isNaN(nextSyncDate.getTime())) {
+    return false;
+  }
+
+  return nextSyncDate.getTime() > Date.now();
+}
+
+function buildStats(shipments) {
+  const list = Array.isArray(shipments) ? shipments : [];
+
+  const total = list.length;
+  const completed = list.filter(
+    (shipment) => String(shipment.status || "").toLowerCase() === "completed"
+  ).length;
+  const problems = list.filter((shipment) => isProblemShipment(shipment)).length;
+  const waitingForNextSync = list.filter((shipment) => hasUpcomingSync(shipment)).length;
+
+  return {
+    total,
+    completed,
+    problems,
+    waitingForNextSync
+  };
 }
 
 function renderRows(shipments) {
   if (!Array.isArray(shipments) || shipments.length === 0) {
     return `
       <tr>
-        <td colspan="9" class="empty-cell">Inga shipments hittades för aktuellt filter.</td>
+        <td colspan="10" class="empty-cell">Inga shipments hittades för aktuellt filter.</td>
       </tr>
     `;
   }
@@ -94,11 +140,17 @@ function renderRows(shipments) {
       )}`;
       const carrierStatusText = escapeHtml(shipment.carrier_status_text || "-");
       const syncedAt = escapeHtml(formatDateSv(shipment.carrier_last_synced_at));
+      const nextSyncAt = escapeHtml(formatDateSv(shipment.carrier_next_sync_at));
       const createdAt = escapeHtml(formatDateSv(shipment.created_at));
       const statusClass = getStatusClass(shipment.status);
+      const syncClass = getSyncClass(shipment.carrier_last_sync_status);
+      const syncStatusText = escapeHtml(
+        formatSyncStatus(shipment.carrier_last_sync_status)
+      );
+      const problemRowClass = isProblemShipment(shipment) ? "problem-row" : "";
 
       return `
-        <tr class="clickable-row" onclick="window.location.href='${detailsUrl}'">
+        <tr class="clickable-row ${problemRowClass}" onclick="window.location.href='${detailsUrl}'">
           <td>
             <div class="primary">
               <a class="order-link" href="${detailsUrl}" onclick="event.stopPropagation();">
@@ -118,8 +170,10 @@ function renderRows(shipments) {
             }
           </td>
           <td>${carrierStatusText}</td>
+          <td><span class="sync-pill ${syncClass}">${syncStatusText}</span></td>
           <td>${escapeHtml(String(shipment.carrier_event_count ?? 0))}</td>
           <td>${syncedAt}</td>
+          <td>${nextSyncAt}</td>
           <td>${createdAt}</td>
           <td>
             <div class="row-actions">
@@ -147,6 +201,7 @@ function renderAdminDashboard({
   const q = escapeHtml(filters.q || "");
   const status = String(filters.status || "");
   const carrier = String(filters.carrier || "");
+  const stats = buildStats(shipments);
 
   return `
     <!DOCTYPE html>
@@ -192,7 +247,7 @@ function renderAdminDashboard({
         }
 
         .wrap {
-          max-width: 1380px;
+          max-width: 1480px;
           margin: 0 auto;
         }
 
@@ -257,7 +312,7 @@ function renderAdminDashboard({
 
         .stats {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 16px;
           margin-top: 22px;
         }
@@ -267,6 +322,21 @@ function renderAdminDashboard({
           border: 1px solid var(--line);
           border-radius: 18px;
           padding: 18px;
+        }
+
+        .stat-card.problem {
+          border-color: #fecaca;
+          background: #fffafa;
+        }
+
+        .stat-card.success {
+          border-color: #bbf7d0;
+          background: #f8fffb;
+        }
+
+        .stat-card.waiting {
+          border-color: #dbeafe;
+          background: #f8fbff;
         }
 
         .stat-label {
@@ -409,7 +479,7 @@ function renderAdminDashboard({
         table {
           width: 100%;
           border-collapse: collapse;
-          min-width: 1150px;
+          min-width: 1320px;
         }
 
         thead th {
@@ -437,6 +507,14 @@ function renderAdminDashboard({
 
         .clickable-row:hover {
           background: #fbfdff;
+        }
+
+        .problem-row {
+          background: #fffafa;
+        }
+
+        .problem-row:hover {
+          background: #fff1f2;
         }
 
         .primary {
@@ -503,6 +581,30 @@ function renderAdminDashboard({
           color: var(--neutral-text);
         }
 
+        .sync-pill {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          padding: 8px 12px;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .sync-ok {
+          background: var(--success-bg);
+          color: var(--success-text);
+        }
+
+        .sync-failed {
+          background: var(--danger-bg);
+          color: var(--danger-text);
+        }
+
+        .sync-neutral {
+          background: var(--neutral-bg);
+          color: var(--neutral-text);
+        }
+
         .mono {
           font-family: monospace;
           font-size: 13px;
@@ -514,9 +616,9 @@ function renderAdminDashboard({
           padding: 28px;
         }
 
-        @media (max-width: 980px) {
+        @media (max-width: 1100px) {
           .stats {
-            grid-template-columns: 1fr;
+            grid-template-columns: 1fr 1fr;
           }
 
           .filters-form {
@@ -525,6 +627,12 @@ function renderAdminDashboard({
 
           h1 {
             font-size: 32px;
+          }
+        }
+
+        @media (max-width: 700px) {
+          .stats {
+            grid-template-columns: 1fr;
           }
         }
       </style>
@@ -542,25 +650,28 @@ function renderAdminDashboard({
         <div class="hero">
           <h1>Admin Dashboard</h1>
           <p class="subtitle">
-            Här ser du senaste ShipOne-försändelser, live carrier-status, senaste sync och snabblänkar till tracking och JSON-data.
+            Här ser du senaste ShipOne-försändelser, live carrier-status, senaste sync och tydliga driftindikatorer för problem och nästa sync.
           </p>
 
           <div class="stats">
             <div class="stat-card">
               <div class="stat-label">Matchande shipments</div>
-              <div class="stat-value">${shipmentCount}</div>
+              <div class="stat-value">${stats.total}</div>
             </div>
 
-            <div class="stat-card">
-              <div class="stat-label">Aktiv carrier just nu</div>
-              <div class="stat-value">${
-                carrier ? escapeHtml(formatCarrierName(carrier)) : "Alla"
-              }</div>
+            <div class="stat-card success">
+              <div class="stat-label">Slutförda</div>
+              <div class="stat-value">${stats.completed}</div>
             </div>
 
-            <div class="stat-card">
-              <div class="stat-label">Syncmotor</div>
-              <div class="stat-value">Live</div>
+            <div class="stat-card problem">
+              <div class="stat-label">Problem</div>
+              <div class="stat-value">${stats.problems}</div>
+            </div>
+
+            <div class="stat-card waiting">
+              <div class="stat-label">Väntar på nästa sync</div>
+              <div class="stat-value">${stats.waitingForNextSync}</div>
             </div>
           </div>
         </div>
@@ -635,8 +746,10 @@ function renderAdminDashboard({
                   <th>Status</th>
                   <th>Tracking</th>
                   <th>Carrier-status</th>
+                  <th>Sync-status</th>
                   <th>Events</th>
                   <th>Senast synkad</th>
+                  <th>Nästa sync</th>
                   <th>Skapad</th>
                   <th>Data</th>
                 </tr>

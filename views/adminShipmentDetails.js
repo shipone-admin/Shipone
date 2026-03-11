@@ -73,7 +73,59 @@ function renderJsonBlock(value) {
   }
 }
 
-function renderAdminShipmentDetails({ shipment }) {
+function getEventStateClass(status) {
+  if (status === "done") return "event-done";
+  if (status === "active") return "event-active";
+  if (status === "failed") return "event-failed";
+  return "event-pending";
+}
+
+function getEventSourceLabel(source) {
+  if (source === "shopify") return "Shopify";
+  if (source === "postnord") return "PostNord";
+  if (source === "carrier") return "Transportör";
+  return "ShipOne";
+}
+
+function renderTimeline(events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return `
+      <div class="empty-note">
+        Inga tracking-events finns ännu för detta shipment.
+      </div>
+    `;
+  }
+
+  return `
+    <ul class="timeline">
+      ${events
+        .map((event) => {
+          const title = escapeHtml(event.title || "Tracking-event");
+          const description = escapeHtml(event.description || "-");
+          const occurredAt = escapeHtml(formatDateSv(event.occurredAt));
+          const source = escapeHtml(getEventSourceLabel(event.source));
+          const stateClass = getEventStateClass(event.status);
+
+          return `
+            <li class="timeline-item">
+              <div class="timeline-marker ${stateClass}"></div>
+              <div class="timeline-card">
+                <div class="timeline-top">
+                  <div class="timeline-title">${title}</div>
+                  <div class="timeline-source">${source}</div>
+                </div>
+                <div class="timeline-time">${occurredAt}</div>
+                <div class="timeline-description">${description}</div>
+              </div>
+            </li>
+          `;
+        })
+        .join("")}
+    </ul>
+  `;
+}
+
+function renderAdminShipmentDetails({ shipment, events = [], carrierTracking = null }) {
   const orderId = escapeHtml(shipment.order_id || "-");
   const orderName = escapeHtml(shipment.order_name || "-");
   const carrier = escapeHtml(formatCarrierName(shipment.actual_carrier));
@@ -87,6 +139,9 @@ function renderAdminShipmentDetails({ shipment }) {
     : "";
   const adminJsonUrl = `/shipments/${encodeURIComponent(shipment.order_id)}`;
   const statusClass = getStatusClass(shipment.status);
+  const liveStatusText = carrierTracking?.statusText
+    ? escapeHtml(carrierTracking.statusText)
+    : escapeHtml(shipment.carrier_status_text || "-");
 
   return `
     <!DOCTYPE html>
@@ -231,6 +286,31 @@ function renderAdminShipmentDetails({ shipment }) {
           color: var(--neutral-text);
         }
 
+        .action-links {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-top: 18px;
+        }
+
+        .action-button {
+          display: inline-flex;
+          align-items: center;
+          text-decoration: none;
+          background: var(--brand);
+          color: white;
+          border-radius: 14px;
+          padding: 12px 16px;
+          font-weight: 700;
+          font-size: 14px;
+        }
+
+        .action-button.secondary {
+          background: #fff;
+          color: var(--brand);
+          border: 1px solid #cfe0ff;
+        }
+
         .grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -243,6 +323,10 @@ function renderAdminShipmentDetails({ shipment }) {
           border-radius: 22px;
           box-shadow: var(--shadow);
           padding: 22px;
+        }
+
+        .full-width {
+          grid-column: 1 / -1;
         }
 
         .card-title {
@@ -288,35 +372,6 @@ function renderAdminShipmentDetails({ shipment }) {
           font-size: 17px;
         }
 
-        .action-links {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          margin-top: 18px;
-        }
-
-        .action-button {
-          display: inline-flex;
-          align-items: center;
-          text-decoration: none;
-          background: var(--brand);
-          color: white;
-          border-radius: 14px;
-          padding: 12px 16px;
-          font-weight: 700;
-          font-size: 14px;
-        }
-
-        .action-button.secondary {
-          background: #fff;
-          color: var(--brand);
-          border: 1px solid #cfe0ff;
-        }
-
-        .full-width {
-          grid-column: 1 / -1;
-        }
-
         .json-block {
           margin: 0;
           background: #0f172a;
@@ -332,6 +387,84 @@ function renderAdminShipmentDetails({ shipment }) {
 
         .empty-note {
           color: var(--muted);
+          line-height: 1.6;
+        }
+
+        .timeline {
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          display: grid;
+          gap: 14px;
+        }
+
+        .timeline-item {
+          display: grid;
+          grid-template-columns: 16px 1fr;
+          gap: 14px;
+          align-items: start;
+        }
+
+        .timeline-marker {
+          width: 16px;
+          height: 16px;
+          border-radius: 999px;
+          margin-top: 6px;
+        }
+
+        .event-done {
+          background: #047857;
+        }
+
+        .event-active {
+          background: #2563eb;
+        }
+
+        .event-failed {
+          background: #b91c1c;
+        }
+
+        .event-pending {
+          background: #94a3b8;
+        }
+
+        .timeline-card {
+          background: #ffffff;
+          border: 1px solid #e6edf5;
+          border-radius: 16px;
+          padding: 16px;
+        }
+
+        .timeline-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 6px;
+        }
+
+        .timeline-title {
+          font-size: 16px;
+          font-weight: 800;
+        }
+
+        .timeline-source {
+          font-size: 12px;
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 700;
+        }
+
+        .timeline-time {
+          font-size: 14px;
+          color: var(--muted);
+          margin-bottom: 8px;
+        }
+
+        .timeline-description {
+          font-size: 14px;
           line-height: 1.6;
         }
 
@@ -367,7 +500,7 @@ function renderAdminShipmentDetails({ shipment }) {
         <div class="hero">
           <h1>${orderName}</h1>
           <p class="subtitle">
-            Detaljsida för shipment i ShipOne admin. Här ser du orderdata, carrier-status, sync-data och full teknisk payload.
+            Detaljsida för shipment i ShipOne admin. Här ser du orderdata, carrier-status, sync-data och full timeline för tracking.
           </p>
 
           <div class="hero-meta">
@@ -458,8 +591,8 @@ function renderAdminShipmentDetails({ shipment }) {
               </div>
 
               <div class="info-row">
-                <div class="label">Carrier-status</div>
-                <div class="value">${escapeHtml(shipment.carrier_status_text || "-")}</div>
+                <div class="label">Live carrier-status</div>
+                <div class="value">${liveStatusText}</div>
               </div>
 
               <div class="info-row">
@@ -507,6 +640,11 @@ function renderAdminShipmentDetails({ shipment }) {
                 <div class="value">${escapeHtml(formatDateSv(shipment.updated_at))}</div>
               </div>
             </div>
+          </div>
+
+          <div class="card full-width">
+            <h2 class="card-title">Tracking Events Timeline</h2>
+            ${renderTimeline(events)}
           </div>
 
           <div class="card full-width">

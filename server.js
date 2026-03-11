@@ -73,17 +73,61 @@ function requireCronSecret(req, res, next) {
   return next();
 }
 
+function normalizeAdminFilters(queryParams) {
+  return {
+    q: String(queryParams.q || "").trim(),
+    status: String(queryParams.status || "").trim().toLowerCase(),
+    carrier: String(queryParams.carrier || "").trim().toLowerCase()
+  };
+}
+
+function matchesAdminFilters(shipment, filters) {
+  const searchHaystack = [
+    shipment.order_name,
+    shipment.order_id,
+    shipment.tracking_number
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (filters.q && !searchHaystack.includes(filters.q.toLowerCase())) {
+    return false;
+  }
+
+  if (filters.status) {
+    const shipmentStatus = String(shipment.status || "").toLowerCase();
+    if (shipmentStatus !== filters.status) {
+      return false;
+    }
+  }
+
+  if (filters.carrier) {
+    const shipmentCarrier = String(shipment.actual_carrier || "").toLowerCase();
+    if (shipmentCarrier !== filters.carrier) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 app.get("/", (req, res) => {
   return res.status(200).send(renderHomePage());
 });
 
 app.get("/admin", async (req, res) => {
   try {
-    const shipments = await getRecentShipments(50);
+    const filters = normalizeAdminFilters(req.query);
+    const shipments = await getRecentShipments(200);
+    const filteredShipments = shipments.filter((shipment) =>
+      matchesAdminFilters(shipment, filters)
+    );
 
     return res.status(200).send(
       renderAdminDashboard({
-        shipments
+        shipments: filteredShipments,
+        filters
       })
     );
   } catch (error) {

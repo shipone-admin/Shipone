@@ -51,7 +51,7 @@ function getPostNordStage(statusText) {
     return {
       key: "in_transit",
       label: "Under transport",
-      description: "Försändelsen rör sig genom PostNords nätverk."
+      description: "Försändelsen rör sig genom transportörens nätverk."
     };
   }
 
@@ -103,6 +103,98 @@ function getPostNordStage(statusText) {
   };
 }
 
+function getDHLStage(statusText) {
+  const text = normalizeText(statusText);
+
+  if (!text) {
+    return {
+      key: "unknown",
+      label: null,
+      description: null
+    };
+  }
+
+  if (
+    text.includes("information received") ||
+    text.includes("shipment information received") ||
+    text.includes("pre-transit") ||
+    text.includes("label created")
+  ) {
+    return {
+      key: "registered",
+      label: "Registrerad",
+      description: "Försändelsen är registrerad hos DHL men har ännu inte kommit vidare i transportflödet."
+    };
+  }
+
+  if (
+    text.includes("picked up") ||
+    text.includes("processed") ||
+    text.includes("received")
+  ) {
+    return {
+      key: "received",
+      label: "Mottagen av DHL",
+      description: "DHL har tagit emot försändelsen och den är nu inne i transportflödet."
+    };
+  }
+
+  if (
+    text.includes("in transit") ||
+    text.includes("transit") ||
+    text.includes("departed") ||
+    text.includes("arrived")
+  ) {
+    return {
+      key: "in_transit",
+      label: "Under transport",
+      description: "Försändelsen rör sig genom DHL:s nätverk."
+    };
+  }
+
+  if (
+    text.includes("out for delivery") ||
+    text.includes("with delivery courier")
+  ) {
+    return {
+      key: "out_for_delivery",
+      label: "Ute för leverans",
+      description: "Försändelsen är ute för leverans."
+    };
+  }
+
+  if (
+    text.includes("delivered") ||
+    text.includes("delivery successful") ||
+    text.includes("signed")
+  ) {
+    return {
+      key: "delivered",
+      label: "Levererad",
+      description: "Försändelsen har levererats till mottagaren."
+    };
+  }
+
+  if (
+    text.includes("exception") ||
+    text.includes("failed") ||
+    text.includes("undeliverable") ||
+    text.includes("return")
+  ) {
+    return {
+      key: "issue",
+      label: "Leveransproblem",
+      description: "Det finns ett leveransproblem eller en avvikelse i DHL-flödet."
+    };
+  }
+
+  return {
+    key: "carrier_update",
+    label: "Carrier-uppdatering",
+    description: statusText
+  };
+}
+
 function getFallbackShipmentStage(shipment) {
   const status = normalizeText(shipment?.status);
 
@@ -137,16 +229,34 @@ function getFallbackShipmentStage(shipment) {
   };
 }
 
+function getCarrierStage(actualCarrier, statusText) {
+  const carrier = normalizeText(actualCarrier);
+
+  if (carrier === "postnord") {
+    return getPostNordStage(statusText);
+  }
+
+  if (carrier === "dhl") {
+    return getDHLStage(statusText);
+  }
+
+  return {
+    key: "unknown",
+    label: null,
+    description: null
+  };
+}
+
 function getDisplayStatus({ shipment, carrierTracking }) {
   const carrierStatusText = carrierTracking?.statusText || "";
-  const postNordStage = getPostNordStage(carrierStatusText);
+  const carrierStage = getCarrierStage(shipment?.actual_carrier, carrierStatusText);
 
-  if (postNordStage.key !== "unknown") {
+  if (carrierStage.key !== "unknown") {
     return {
-      source: "postnord",
-      stage: postNordStage.key,
-      label: postNordStage.label,
-      description: postNordStage.description,
+      source: normalizeText(shipment?.actual_carrier) || "carrier",
+      stage: carrierStage.key,
+      label: carrierStage.label,
+      description: carrierStage.description,
       rawCarrierStatus: carrierStatusText
     };
   }

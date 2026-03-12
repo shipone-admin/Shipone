@@ -29,6 +29,8 @@ const {
   beginOrderProcessing,
   failOrderProcessing,
   saveShipmentOutcome,
+  createDHLTestShipment,
+  deleteShipmentByOrderId,
   findShipmentByOrderId,
   getRecentShipments
 } = require("./services/shipmentStore");
@@ -63,7 +65,10 @@ function getBearerToken(req) {
 function requireCronSecret(req, res, next) {
   const configuredSecret = String(process.env.CRON_SECRET || "").trim();
 
-  const providedSecret = getBearerToken(req) || req.query.token || "";
+  const providedSecret =
+    getBearerToken(req) ||
+    req.query.token ||
+    "";
 
   if (!configuredSecret || providedSecret !== configuredSecret) {
     return res.status(401).json({
@@ -137,6 +142,122 @@ async function getLiveCarrierTrackingForShipment(shipment) {
   };
 }
 
+function renderDHLTestPage({ token, createdShipment = null, deletedShipment = null, error = "" }) {
+  const escapedToken = String(token || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const createdHtml = createdShipment
+    ? `
+      <div style="margin-bottom:16px;padding:16px;border-radius:14px;background:#ecfdf5;color:#065f46;border:1px solid #bbf7d0;">
+        <strong>DHL test-shipment skapat.</strong><br />
+        Order ID: ${createdShipment.order_id}<br />
+        Trackingnummer: ${createdShipment.tracking_number}<br />
+        <a href="/admin/shipment/${encodeURIComponent(createdShipment.order_id)}" style="color:#065f46;font-weight:700;">Öppna shipment</a>
+      </div>
+    `
+    : "";
+
+  const deletedHtml = deletedShipment
+    ? `
+      <div style="margin-bottom:16px;padding:16px;border-radius:14px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;">
+        <strong>DHL test-shipment raderat.</strong><br />
+        Order ID: ${deletedShipment.order_id}
+      </div>
+    `
+    : "";
+
+  const errorHtml = error
+    ? `
+      <div style="margin-bottom:16px;padding:16px;border-radius:14px;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;">
+        <strong>Fel:</strong> ${String(error)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}
+      </div>
+    `
+    : "";
+
+  return `
+    <!DOCTYPE html>
+    <html lang="sv">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>ShipOne DHL Test Tools</title>
+      </head>
+      <body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:24px;color:#0f172a;">
+        <div style="max-width:900px;margin:0 auto;">
+          <div style="margin-bottom:18px;">
+            <a href="/admin" style="color:#2563eb;font-weight:700;text-decoration:none;">← Till admin</a>
+          </div>
+
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:24px;margin-bottom:20px;">
+            <h1 style="margin-top:0;">ShipOne DHL Test Tools</h1>
+            <p style="color:#475569;line-height:1.6;">
+              Här kan du skapa och radera isolerade DHL test-shipments utan att röra PostNord-flödet.
+            </p>
+            ${createdHtml}
+            ${deletedHtml}
+            ${errorHtml}
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:24px;">
+              <h2 style="margin-top:0;">Skapa DHL test-shipment</h2>
+              <form method="GET" action="/admin/test/dhl/create">
+                <input type="hidden" name="token" value="${escapedToken}" />
+
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">DHL trackingnummer</label>
+                  <input name="trackingNumber" type="text" required style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;" />
+                </div>
+
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">Order ID (valfri)</label>
+                  <input name="orderId" type="text" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;" />
+                </div>
+
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">Ordernamn (valfri)</label>
+                  <input name="orderName" type="text" placeholder="#DHL-TEST" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;" />
+                </div>
+
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">E-post (valfri)</label>
+                  <input name="email" type="text" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;" />
+                </div>
+
+                <button type="submit" style="padding:12px 16px;border:none;border-radius:12px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;">
+                  Skapa DHL test-shipment
+                </button>
+              </form>
+            </div>
+
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:24px;">
+              <h2 style="margin-top:0;">Rollback / radera test-shipment</h2>
+              <form method="GET" action="/admin/test/dhl/delete">
+                <input type="hidden" name="token" value="${escapedToken}" />
+
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">Order ID att radera</label>
+                  <input name="orderId" type="text" required style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;" />
+                </div>
+
+                <button type="submit" style="padding:12px 16px;border:none;border-radius:12px;background:#dc2626;color:#fff;font-weight:700;cursor:pointer;">
+                  Radera test-shipment
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 app.get("/", (req, res) => {
   return res.status(200).send(renderHomePage());
 });
@@ -171,6 +292,74 @@ app.get("/admin", async (req, res) => {
         </body>
       </html>
     `);
+  }
+});
+
+app.get("/admin/test/dhl", requireCronSecret, async (req, res) => {
+  return res.status(200).send(
+    renderDHLTestPage({
+      token: req.query.token || ""
+    })
+  );
+});
+
+app.get("/admin/test/dhl/create", requireCronSecret, async (req, res) => {
+  try {
+    const shipment = await createDHLTestShipment({
+      order_id: req.query.orderId,
+      order_name: req.query.orderName,
+      email: req.query.email,
+      tracking_number: req.query.trackingNumber
+    });
+
+    return res.status(200).send(
+      renderDHLTestPage({
+        token: req.query.token || "",
+        createdShipment: shipment
+      })
+    );
+  } catch (error) {
+    console.error("DHL test shipment create failed:", error.message);
+
+    return res.status(500).send(
+      renderDHLTestPage({
+        token: req.query.token || "",
+        error: error.message
+      })
+    );
+  }
+});
+
+app.get("/admin/test/dhl/delete", requireCronSecret, async (req, res) => {
+  try {
+    const orderId = String(req.query.orderId || "").trim();
+
+    if (!orderId) {
+      return res.status(400).send(
+        renderDHLTestPage({
+          token: req.query.token || "",
+          error: "Order ID saknas för radering"
+        })
+      );
+    }
+
+    const deleted = await deleteShipmentByOrderId(orderId);
+
+    return res.status(200).send(
+      renderDHLTestPage({
+        token: req.query.token || "",
+        deletedShipment: deleted || { order_id: orderId }
+      })
+    );
+  } catch (error) {
+    console.error("DHL test shipment delete failed:", error.message);
+
+    return res.status(500).send(
+      renderDHLTestPage({
+        token: req.query.token || "",
+        error: error.message
+      })
+    );
   }
 });
 

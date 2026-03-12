@@ -9,6 +9,7 @@ const { collectRates } = require("./core/rateCollector");
 
 const { buildTrackingEvents } = require("./services/trackingEvents");
 const { fetchPostNordTracking } = require("./services/postnordTracking");
+const { fetchDHLTracking } = require("./services/dhlTracking");
 const { getDisplayStatus } = require("./services/trackingStatus");
 const { saveCarrierTrackingSnapshot } = require("./services/trackingSyncStore");
 
@@ -114,6 +115,28 @@ function matchesAdminFilters(shipment, filters) {
   return true;
 }
 
+async function getLiveCarrierTrackingForAdmin(shipment) {
+  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+
+  if (actualCarrier === "postnord") {
+    return fetchPostNordTracking(shipment.tracking_number);
+  }
+
+  if (actualCarrier === "dhl") {
+    return fetchDHLTracking(shipment.tracking_number);
+  }
+
+  return {
+    success: false,
+    skipped: true,
+    reason: "Live carrier tracking is only enabled for PostNord and DHL shipments",
+    events: [],
+    statusText: shipment?.carrier_status_text || null,
+    eventCount: shipment?.carrier_event_count || 0,
+    latestEventAt: shipment?.carrier_last_event_at || null
+  };
+}
+
 app.get("/", (req, res) => {
   return res.status(200).send(renderHomePage());
 });
@@ -194,19 +217,9 @@ app.get("/admin/shipment/:orderId", async (req, res) => {
       `);
     }
 
-    let carrierTracking = {
-      success: false,
-      skipped: true,
-      reason: "Live carrier tracking is only enabled for PostNord shipments",
-      events: [],
-      statusText: shipment.carrier_status_text || null,
-      eventCount: shipment.carrier_event_count || 0,
-      latestEventAt: shipment.carrier_last_event_at || null
-    };
+    const carrierTracking = await getLiveCarrierTrackingForAdmin(shipment);
 
-    if (String(shipment.actual_carrier || "").toLowerCase() === "postnord") {
-      carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
-
+    if (!carrierTracking.skipped) {
       try {
         await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
       } catch (syncError) {
@@ -216,7 +229,8 @@ app.get("/admin/shipment/:orderId", async (req, res) => {
 
     const events = buildTrackingEvents({
       shipment,
-      externalEvents: carrierTracking.events || []
+      externalEvents: carrierTracking.events || [],
+      externalSource: shipment.actual_carrier || "carrier"
     });
 
     return res.status(200).send(
@@ -449,7 +463,8 @@ app.get("/track/:trackingNumber", async (req, res) => {
 
     const events = buildTrackingEvents({
       shipment,
-      externalEvents: carrierTracking.events
+      externalEvents: carrierTracking.events,
+      externalSource: shipment.actual_carrier || "carrier"
     });
 
     return res.send(

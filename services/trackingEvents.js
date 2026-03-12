@@ -191,9 +191,16 @@ function sortEventsAscending(events) {
   });
 }
 
-function buildTrackingEvents({ shipment, externalEvents = [] }) {
+function buildTrackingEvents({
+  shipment,
+  externalEvents = [],
+  externalSource = "carrier"
+}) {
   const internalEvents = buildInternalTrackingEvents(shipment);
-  const normalizedExternalEvents = normalizeExternalEvents(externalEvents, "postnord");
+  const normalizedExternalEvents = normalizeExternalEvents(
+    externalEvents,
+    externalSource || shipment?.actual_carrier || "carrier"
+  );
 
   return sortEventsAscending([...internalEvents, ...normalizedExternalEvents]);
 }

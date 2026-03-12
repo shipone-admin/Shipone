@@ -25,6 +25,24 @@ function normalizeBoolean(value) {
   return Boolean(value);
 }
 
+function buildGeneratedTestOrderId() {
+  const timestamp = Date.now();
+  const suffix = Math.floor(Math.random() * 10);
+  return String(`9${timestamp}${suffix}`);
+}
+
+function buildGeneratedTestOrderNumber(orderId) {
+  const digits = String(orderId || "").replace(/\D/g, "");
+  const tail = digits.slice(-6);
+  const value = Number(tail);
+  return Number.isNaN(value) ? null : value;
+}
+
+function normalizeTestValue(value) {
+  const text = String(value || "").trim();
+  return text || null;
+}
+
 async function beginOrderProcessing(order) {
   const shippingAddress = buildShippingAddress(order);
   const orderNumber = normalizeOrderNumber(order);
@@ -258,6 +276,197 @@ async function saveShipmentOutcome(order, outcome = {}) {
   return result.rows[0] || null;
 }
 
+async function createDHLTestShipment(testData = {}) {
+  const orderId = normalizeTestValue(testData.order_id) || buildGeneratedTestOrderId();
+  const orderNumber =
+    testData.order_number !== undefined && testData.order_number !== null
+      ? Number(testData.order_number)
+      : buildGeneratedTestOrderNumber(orderId);
+
+  const safeOrderNumber = Number.isNaN(orderNumber) ? null : orderNumber;
+  const trackingNumber = normalizeTestValue(testData.tracking_number);
+
+  if (!trackingNumber) {
+    throw new Error("Missing DHL tracking number");
+  }
+
+  const orderName =
+    normalizeTestValue(testData.order_name) || `#DHL-TEST-${String(orderId).slice(-6)}`;
+
+  const email = normalizeTestValue(testData.email) || "dhl-test@shipone.local";
+  const customerName = normalizeTestValue(testData.customer_name) || "DHL Test Customer";
+  const shippingCity = normalizeTestValue(testData.shipping_city) || "Stockholm";
+  const shippingZip = normalizeTestValue(testData.shipping_zip) || "111 22";
+  const shippingCountry = normalizeTestValue(testData.shipping_country) || "Sweden";
+  const selectedService =
+    normalizeTestValue(testData.selected_service) || "DHL Parcel Test";
+  const shiponeChoice = normalizeTestValue(testData.shipone_choice) || "DHL_TEST";
+
+  const selectedOption = {
+    id: "DHL_TEST",
+    name: selectedService,
+    carrier: "dhl",
+    price: 0,
+    eta_days: null,
+    co2: null
+  };
+
+  const shipmentResult = {
+    success: true,
+    carrier: "dhl",
+    mode: "manual_test",
+    data: {
+      trackingNumber,
+      trackingUrl: null
+    }
+  };
+
+  const fulfillmentResult = {
+    success: true,
+    mode: "manual_test",
+    note: "Created as isolated DHL test shipment in admin-safe flow"
+  };
+
+  const result = await query(
+    `
+      INSERT INTO shipments (
+        order_id,
+        order_name,
+        order_number,
+        email,
+        customer_name,
+        shipping_city,
+        shipping_zip,
+        shipping_country,
+        status,
+        retry_count,
+        shipone_choice,
+        selected_option,
+        selected_carrier,
+        selected_service,
+        actual_carrier,
+        fallback_used,
+        fallback_from,
+        tracking_number,
+        tracking_url,
+        shipment_success,
+        fulfillment_success,
+        shipment_result,
+        fulfillment_result,
+        error,
+        carrier_status_text,
+        carrier_last_event_at,
+        carrier_event_count,
+        carrier_last_synced_at,
+        carrier_next_sync_at,
+        carrier_sync_attempts,
+        carrier_last_sync_status,
+        created_at,
+        updated_at,
+        completed_at,
+        failed_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        'completed',
+        0,
+        $9,
+        $10,
+        'dhl',
+        $11,
+        'dhl',
+        false,
+        NULL,
+        $12,
+        NULL,
+        true,
+        true,
+        $13,
+        $14,
+        NULL,
+        NULL,
+        NULL,
+        0,
+        NULL,
+        NOW(),
+        0,
+        NULL,
+        NOW(),
+        NOW(),
+        NOW(),
+        NULL
+      )
+      ON CONFLICT (order_id)
+      DO UPDATE SET
+        order_name = EXCLUDED.order_name,
+        order_number = EXCLUDED.order_number,
+        email = EXCLUDED.email,
+        customer_name = EXCLUDED.customer_name,
+        shipping_city = EXCLUDED.shipping_city,
+        shipping_zip = EXCLUDED.shipping_zip,
+        shipping_country = EXCLUDED.shipping_country,
+        status = EXCLUDED.status,
+        retry_count = 0,
+        shipone_choice = EXCLUDED.shipone_choice,
+        selected_option = EXCLUDED.selected_option,
+        selected_carrier = EXCLUDED.selected_carrier,
+        selected_service = EXCLUDED.selected_service,
+        actual_carrier = EXCLUDED.actual_carrier,
+        fallback_used = EXCLUDED.fallback_used,
+        fallback_from = EXCLUDED.fallback_from,
+        tracking_number = EXCLUDED.tracking_number,
+        tracking_url = EXCLUDED.tracking_url,
+        shipment_success = EXCLUDED.shipment_success,
+        fulfillment_success = EXCLUDED.fulfillment_success,
+        shipment_result = EXCLUDED.shipment_result,
+        fulfillment_result = EXCLUDED.fulfillment_result,
+        error = NULL,
+        carrier_status_text = NULL,
+        carrier_last_event_at = NULL,
+        carrier_event_count = 0,
+        carrier_last_synced_at = NULL,
+        carrier_next_sync_at = NOW(),
+        carrier_sync_attempts = 0,
+        carrier_last_sync_status = NULL,
+        completed_at = NOW(),
+        failed_at = NULL,
+        updated_at = NOW()
+      RETURNING *
+    `,
+    [
+      orderId,
+      orderName,
+      safeOrderNumber,
+      email,
+      customerName,
+      shippingCity,
+      shippingZip,
+      shippingCountry,
+      shiponeChoice,
+      JSON.stringify(selectedOption),
+      selectedService,
+      trackingNumber,
+      JSON.stringify(shipmentResult),
+      JSON.stringify(fulfillmentResult)
+    ]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function deleteShipmentByOrderId(orderId) {
+  const result = await query(
+    `
+      DELETE FROM shipments
+      WHERE order_id = $1
+      RETURNING *
+    `,
+    [orderId]
+  );
+
+  return result.rows[0] || null;
+}
+
 async function readShipments() {
   const result = await query(
     `
@@ -412,6 +621,8 @@ module.exports = {
   beginOrderProcessing,
   failOrderProcessing,
   saveShipmentOutcome,
+  createDHLTestShipment,
+  deleteShipmentByOrderId,
   readShipments,
   findShipmentByOrderId,
   getRecentShipments

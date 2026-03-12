@@ -115,7 +115,7 @@ function matchesAdminFilters(shipment, filters) {
   return true;
 }
 
-async function getLiveCarrierTrackingForAdmin(shipment) {
+async function getLiveCarrierTrackingForShipment(shipment) {
   const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
 
   if (actualCarrier === "postnord") {
@@ -217,7 +217,7 @@ app.get("/admin/shipment/:orderId", async (req, res) => {
       `);
     }
 
-    const carrierTracking = await getLiveCarrierTrackingForAdmin(shipment);
+    const carrierTracking = await getLiveCarrierTrackingForShipment(shipment);
 
     if (!carrierTracking.skipped) {
       try {
@@ -442,17 +442,9 @@ app.get("/track/:trackingNumber", async (req, res) => {
     }
 
     const shipment = result.rows[0];
+    const carrierTracking = await getLiveCarrierTrackingForShipment(shipment);
 
-    let carrierTracking = {
-      success: false,
-      skipped: true,
-      events: [],
-      statusText: null
-    };
-
-    if (String(shipment.actual_carrier || "").toLowerCase() === "postnord") {
-      carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
-
+    if (!carrierTracking.skipped) {
       await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
     }
 

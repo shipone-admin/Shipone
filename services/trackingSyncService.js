@@ -1,5 +1,6 @@
 const { query } = require("./db");
 const { fetchPostNordTracking } = require("./postnordTracking");
+const { fetchDHLTracking } = require("./dhlTracking");
 const { saveCarrierTrackingSnapshot } = require("./trackingSyncStore");
 const { getDisplayStatus } = require("./trackingStatus");
 const { buildTrackingEvents } = require("./trackingEvents");
@@ -32,6 +33,28 @@ async function findShipmentByOrderId(orderId) {
   return result.rows[0] || null;
 }
 
+async function fetchCarrierTrackingForShipment(shipment) {
+  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+
+  if (actualCarrier === "postnord") {
+    return fetchPostNordTracking(shipment.tracking_number);
+  }
+
+  if (actualCarrier === "dhl") {
+    return fetchDHLTracking(shipment.tracking_number);
+  }
+
+  return {
+    success: false,
+    skipped: true,
+    reason: "Manual live tracking sync is only supported for PostNord and DHL shipments",
+    events: [],
+    statusText: shipment?.carrier_status_text || null,
+    eventCount: shipment?.carrier_event_count || 0,
+    latestEventAt: shipment?.carrier_last_event_at || null
+  };
+}
+
 async function syncPostNordTrackingForShipment(shipment) {
   if (!shipment) {
     return {
@@ -43,11 +66,11 @@ async function syncPostNordTrackingForShipment(shipment) {
 
   const actualCarrier = String(shipment.actual_carrier || "").toLowerCase();
 
-  if (actualCarrier !== "postnord") {
+  if (actualCarrier !== "postnord" && actualCarrier !== "dhl") {
     return {
       success: false,
       statusCode: 400,
-      error: "Manual live tracking sync is only supported for PostNord shipments",
+      error: "Manual live tracking sync is only supported for PostNord and DHL shipments",
       shipment: {
         id: shipment.id,
         order_id: shipment.order_id,
@@ -70,8 +93,7 @@ async function syncPostNordTrackingForShipment(shipment) {
     };
   }
 
-  const carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
-
+  const carrierTracking = await fetchCarrierTrackingForShipment(shipment);
   const snapshot = await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
 
   const refreshedResult = await query(
@@ -93,7 +115,8 @@ async function syncPostNordTrackingForShipment(shipment) {
 
   const events = buildTrackingEvents({
     shipment: refreshedShipment,
-    externalEvents: carrierTracking.events
+    externalEvents: carrierTracking.events,
+    externalSource: actualCarrier
   });
 
   return {

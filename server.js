@@ -2,7 +2,10 @@ const express = require("express");
 const axios = require("axios");
 
 const { initDatabase, query } = require("./services/db");
-const { chooseBestOption } = require("./services/routingEngine");
+const {
+  chooseBestOption,
+  normalizeChoice
+} = require("./services/routingEngine");
 const { createShipment } = require("./services/createShipment");
 const { fulfillShopifyOrder } = require("./services/shopifyfulfillment");
 const { collectRates } = require("./core/rateCollector");
@@ -118,6 +121,31 @@ function matchesAdminFilters(shipment, filters) {
   }
 
   return true;
+}
+
+function extractShipOneDeliveryChoice(order) {
+  const noteAttributes = Array.isArray(order?.note_attributes)
+    ? order.note_attributes
+    : [];
+
+  const match = noteAttributes.find((attribute) => {
+    const name = String(attribute?.name || "").trim().toLowerCase();
+    return name === "shipone_delivery";
+  });
+
+  const rawChoice = String(match?.value || "").trim();
+
+  if (!rawChoice) {
+    return {
+      raw: "",
+      normalized: "SMART"
+    };
+  }
+
+  return {
+    raw: rawChoice,
+    normalized: normalizeChoice(rawChoice)
+  };
 }
 
 async function getLiveCarrierTrackingForShipment(shipment) {
@@ -665,21 +693,7 @@ app.get("/track/:trackingNumber", async (req, res) => {
 
 app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
-console.log(
-  "SHIPONE WEBHOOK ORDER DEBUG:",
-  JSON.stringify(
-    {
-      id: order?.id,
-      name: order?.name,
-      note_attributes: order?.note_attributes,
-      shipping_address: order?.shipping_address,
-      attributes: order?.attributes,
-      shipping_lines: order?.shipping_lines
-    },
-    null,
-    2
-  )
-);
+
   try {
     if (!order || !order.id) {
       return res.sendStatus(200);
@@ -701,8 +715,15 @@ console.log(
     }
 
     const shippingOptions = await collectRates(order);
+    const shipOneChoice = extractShipOneDeliveryChoice(order);
 
-    const selectedOption = chooseBestOption(shippingOptions, "SMART");
+    console.log("🚚 ShipOne order delivery choice raw:", shipOneChoice.raw || "none");
+    console.log("🚚 ShipOne order delivery choice normalized:", shipOneChoice.normalized);
+
+    const selectedOption = chooseBestOption(
+      shippingOptions,
+      shipOneChoice.normalized
+    );
 
     if (!selectedOption) {
       await failOrderProcessing(order.id, {
@@ -712,6 +733,10 @@ console.log(
 
       return res.sendStatus(200);
     }
+
+    console.log("✅ ShipOne selected carrier:", selectedOption.carrier || "unknown");
+    console.log("✅ ShipOne selected service:", selectedOption.name || "unknown");
+    console.log("✅ ShipOne selected price:", selectedOption.price ?? "unknown");
 
     const shipmentResult = await createShipment(order, selectedOption);
 
@@ -734,7 +759,7 @@ console.log(
     }
 
     await saveShipmentOutcome(order, {
-      shipone_choice: "SMART",
+      shipone_choice: shipOneChoice.normalized,
       selected_option: selectedOption,
       selected_carrier: selectedOption.carrier || null,
       selected_service: selectedOption.name || null,

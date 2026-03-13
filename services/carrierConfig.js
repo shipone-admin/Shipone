@@ -1,5 +1,6 @@
 // ================================
 // SHIPONE CARRIER CONFIG
+// SAFE MULTI-RATE STEP
 // ================================
 
 const carrierConfig = {
@@ -11,40 +12,47 @@ const carrierConfig = {
   },
 
   dhl: {
-    enabled: false,
-    allowRates: false,
+    enabled: true,
+    allowRates: true,
     allowShipment: false,
     label: "DHL"
   },
 
   budbee: {
-    enabled: false,
-    allowRates: false,
+    enabled: true,
+    allowRates: true,
     allowShipment: false,
     label: "Budbee"
   }
 };
 
 function canUseCarrierForRates(carrier) {
-  const c = carrierConfig[String(carrier).toLowerCase()];
-  return c && c.enabled && c.allowRates;
+  const c = carrierConfig[String(carrier || "").toLowerCase()];
+  return Boolean(c && c.enabled && c.allowRates);
 }
 
 function canUseCarrierForShipment(carrier) {
-  const c = carrierConfig[String(carrier).toLowerCase()];
-  return c && c.enabled && c.allowShipment;
+  const c = carrierConfig[String(carrier || "").toLowerCase()];
+  return Boolean(c && c.enabled && c.allowShipment);
 }
 
 function getEnabledRateCarriers() {
-  return Object.keys(carrierConfig).filter(
-    (carrier) => carrierConfig[carrier].enabled && carrierConfig[carrier].allowRates
-  );
+  return Object.keys(carrierConfig).filter((carrier) => {
+    const config = carrierConfig[carrier];
+    return config.enabled && config.allowRates;
+  });
 }
 
 function getEnabledShipmentCarriers() {
-  return Object.keys(carrierConfig).filter(
-    (carrier) => carrierConfig[carrier].enabled && carrierConfig[carrier].allowShipment
-  );
+  return Object.keys(carrierConfig).filter((carrier) => {
+    const config = carrierConfig[carrier];
+    return config.enabled && config.allowShipment;
+  });
+}
+
+function getCarrierLabel(carrier) {
+  const c = carrierConfig[String(carrier || "").toLowerCase()];
+  return c?.label || String(carrier || "").toUpperCase();
 }
 
 module.exports = {
@@ -52,5 +60,6 @@ module.exports = {
   canUseCarrierForRates,
   canUseCarrierForShipment,
   getEnabledRateCarriers,
-  getEnabledShipmentCarriers
+  getEnabledShipmentCarriers,
+  getCarrierLabel
 };

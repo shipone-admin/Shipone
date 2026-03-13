@@ -148,6 +148,155 @@ function extractShipOneDeliveryChoice(order) {
   };
 }
 
+function setPublicApiCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+function formatCarrierLabel(carrier) {
+  const normalized = String(carrier || "").toLowerCase();
+
+  if (normalized === "postnord") return "PostNord";
+  if (normalized === "dhl") return "DHL";
+  if (normalized === "budbee") return "Budbee";
+
+  return carrier || "-";
+}
+
+function formatEtaLabel(etaDays) {
+  const value = Number(etaDays);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return "Okänd leveranstid";
+  }
+
+  if (value === 1) {
+    return "1 arbetsdag";
+  }
+
+  return `${value} arbetsdagar`;
+}
+
+function formatPriceLabel(price) {
+  const value = Number(price);
+
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+
+  return `${value} kr`;
+}
+
+function buildPreviewOrder() {
+  return {
+    id: "preview-order",
+    name: "#PREVIEW",
+    shipping_address: {
+      city: "Stockholm",
+      zip: "111 22",
+      country: "Sweden",
+      country_code: "SE"
+    },
+    customer: {
+      first_name: "ShipOne",
+      last_name: "Preview"
+    }
+  };
+}
+
+function buildStrategyMeta(strategyKey) {
+  if (strategyKey === "FAST") {
+    return {
+      code: "FASTEST",
+      title: "Fast",
+      badge: "Snabbast",
+      description: "Strategi: välj snabbaste tillgängliga frakt"
+    };
+  }
+
+  if (strategyKey === "CHEAP") {
+    return {
+      code: "CHEAPEST",
+      title: "Cheap",
+      badge: "Billigast",
+      description: "Strategi: välj billigaste tillgängliga frakt"
+    };
+  }
+
+  return {
+    code: "GREEN",
+    title: "Smart",
+    badge: "Bästa balans",
+    description: "Strategi: välj bäst balans mellan pris, hastighet och miljö"
+  };
+}
+
+function buildPreviewOption(strategyKey, selectedOption, allRates) {
+  const meta = buildStrategyMeta(strategyKey);
+
+  if (!selectedOption) {
+    return {
+      ...meta,
+      available: false,
+      carrier: "-",
+      carrierLabel: "Ingen aktiv carrier",
+      service: "-",
+      etaDays: null,
+      etaLabel: "Ingen leveranstid tillgänglig",
+      price: null,
+      priceLabel: "-",
+      raw: null
+    };
+  }
+
+  return {
+    ...meta,
+    available: true,
+    carrier: selectedOption.carrier || null,
+    carrierLabel: formatCarrierLabel(selectedOption.carrier),
+    service: selectedOption.name || "-",
+    etaDays: selectedOption.eta_days ?? null,
+    etaLabel: formatEtaLabel(selectedOption.eta_days),
+    price: Number(selectedOption.price ?? 0),
+    priceLabel: formatPriceLabel(selectedOption.price),
+    raw: selectedOption,
+    comparedRateCount: Array.isArray(allRates) ? allRates.length : 0
+  };
+}
+
+async function buildShipOneRatePreview() {
+  const previewOrder = buildPreviewOrder();
+  const shippingOptions = await collectRates(previewOrder);
+
+  const fastOption = chooseBestOption(shippingOptions, "FAST");
+  const cheapOption = chooseBestOption(shippingOptions, "CHEAP");
+  const greenOption = chooseBestOption(shippingOptions, "GREEN");
+
+  return {
+    success: true,
+    generatedAt: new Date().toISOString(),
+    currency: "SEK",
+    activeRateCount: shippingOptions.length,
+    activeRates: shippingOptions.map((option) => ({
+      carrier: option.carrier || null,
+      carrierLabel: formatCarrierLabel(option.carrier),
+      service: option.name || "-",
+      price: Number(option.price ?? 0),
+      priceLabel: formatPriceLabel(option.price),
+      etaDays: option.eta_days ?? null,
+      etaLabel: formatEtaLabel(option.eta_days),
+      co2: option.co2 ?? null,
+      raw: option
+    })),
+    strategies: {
+      FASTEST: buildPreviewOption("FAST", fastOption, shippingOptions),
+      CHEAPEST: buildPreviewOption("CHEAP", cheapOption, shippingOptions),
+      GREEN: buildPreviewOption("GREEN", greenOption, shippingOptions)
+    }
+  };
+}
+
 async function getLiveCarrierTrackingForShipment(shipment) {
   const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
 
@@ -170,7 +319,12 @@ async function getLiveCarrierTrackingForShipment(shipment) {
   };
 }
 
-function renderDHLTestPage({ token, createdShipment = null, deletedShipment = null, error = "" }) {
+function renderDHLTestPage({
+  token,
+  createdShipment = null,
+  deletedShipment = null,
+  error = ""
+}) {
   const escapedToken = String(token || "")
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
@@ -288,6 +442,30 @@ function renderDHLTestPage({ token, createdShipment = null, deletedShipment = nu
 
 app.get("/", (req, res) => {
   return res.status(200).send(renderHomePage());
+});
+
+app.options("/api/rates/preview", (req, res) => {
+  setPublicApiCors(res);
+  return res.sendStatus(204);
+});
+
+app.get("/api/rates/preview", async (req, res) => {
+  try {
+    setPublicApiCors(res);
+
+    const preview = await buildShipOneRatePreview();
+
+    return res.status(200).json(preview);
+  } catch (error) {
+    console.error("Rate preview failed:", error.message);
+
+    setPublicApiCors(res);
+
+    return res.status(500).json({
+      success: false,
+      error: "Failed to build ShipOne rate preview"
+    });
+  }
 });
 
 app.get("/admin", async (req, res) => {

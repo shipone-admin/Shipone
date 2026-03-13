@@ -665,12 +665,21 @@ app.get("/track/:trackingNumber", async (req, res) => {
 
 app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
-console.log("SHIPONE ORDER WEBHOOK:", JSON.stringify({
-  id: order.id,
-  name: order.name,
-  note_attributes: order.note_attributes,
-  shipping_address: order.shipping_address
-}, null, 2));
+console.log(
+  "SHIPONE WEBHOOK ORDER DEBUG:",
+  JSON.stringify(
+    {
+      id: order?.id,
+      name: order?.name,
+      note_attributes: order?.note_attributes,
+      shipping_address: order?.shipping_address,
+      attributes: order?.attributes,
+      shipping_lines: order?.shipping_lines
+    },
+    null,
+    2
+  )
+);
   try {
     if (!order || !order.id) {
       return res.sendStatus(200);

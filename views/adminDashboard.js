@@ -71,6 +71,18 @@ function formatHealthLabel(health) {
   return "Alla";
 }
 
+function formatShipOneChoice(choice) {
+  const normalized = String(choice || "").toUpperCase();
+
+  if (normalized === "FAST") return "Fast";
+  if (normalized === "CHEAP") return "Cheap";
+  if (normalized === "GREEN") return "Smart";
+  if (normalized === "SMART") return "Smart";
+  if (normalized === "DHL_TEST") return "DHL Test";
+
+  return choice || "-";
+}
+
 function getStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
 
@@ -151,6 +163,74 @@ function renderHealthPill(shipment) {
   `;
 }
 
+function renderCarrierCell(shipment) {
+  const selectedCarrier = formatCarrierName(shipment.selected_carrier);
+  const actualCarrier = formatCarrierName(shipment.actual_carrier);
+  const selectedService = shipment.selected_service || "-";
+  const fallbackUsed = Boolean(shipment.fallback_used);
+  const fallbackFrom = shipment.fallback_from
+    ? formatCarrierName(shipment.fallback_from)
+    : null;
+
+  const sameCarrier =
+    String(shipment.selected_carrier || "").toLowerCase() ===
+    String(shipment.actual_carrier || "").toLowerCase();
+
+  if (fallbackUsed) {
+    return `
+      <div class="carrier-block">
+        <div class="primary">
+          <span class="carrier-pill carrier-pill-selected">Vald: ${escapeHtml(selectedCarrier)}</span>
+        </div>
+        <div class="secondary">Tjänst: ${escapeHtml(selectedService)}</div>
+        <div class="secondary">
+          <span class="carrier-pill carrier-pill-actual">Faktisk: ${escapeHtml(actualCarrier)}</span>
+        </div>
+        <div class="secondary carrier-fallback-text">
+          Fallback från ${escapeHtml(fallbackFrom || selectedCarrier)} till ${escapeHtml(actualCarrier)}
+        </div>
+      </div>
+    `;
+  }
+
+  if (!sameCarrier && shipment.selected_carrier && shipment.actual_carrier) {
+    return `
+      <div class="carrier-block">
+        <div class="primary">
+          <span class="carrier-pill carrier-pill-selected">Vald: ${escapeHtml(selectedCarrier)}</span>
+        </div>
+        <div class="secondary">Tjänst: ${escapeHtml(selectedService)}</div>
+        <div class="secondary">
+          <span class="carrier-pill carrier-pill-actual">Faktisk: ${escapeHtml(actualCarrier)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="carrier-block">
+      <div class="primary">
+        <span class="carrier-pill">${escapeHtml(actualCarrier)}</span>
+      </div>
+      <div class="secondary">Tjänst: ${escapeHtml(selectedService)}</div>
+    </div>
+  `;
+}
+
+function renderStrategyCell(shipment) {
+  const choice = formatShipOneChoice(shipment.shipone_choice);
+  const fallbackUsed = Boolean(shipment.fallback_used);
+
+  return `
+    <div class="strategy-block">
+      <div class="primary">${escapeHtml(choice)}</div>
+      <div class="secondary">
+        ${fallbackUsed ? "Fallback använd" : "Ingen fallback"}
+      </div>
+    </div>
+  `;
+}
+
 function renderRowActions(shipment, detailsUrl) {
   const orderId = encodeURIComponent(shipment.order_id || "");
   const jsonUrl = `/shipments/${orderId}`;
@@ -194,7 +274,7 @@ function renderRows(shipments) {
   if (!Array.isArray(shipments) || shipments.length === 0) {
     return `
       <tr>
-        <td colspan="12" class="empty-cell">
+        <td colspan="13" class="empty-cell">
           Inga shipments hittades för aktuellt filter.
         </td>
       </tr>
@@ -205,7 +285,6 @@ function renderRows(shipments) {
     .map((shipment) => {
       const orderName = escapeHtml(shipment.order_name || "-");
       const orderId = escapeHtml(shipment.order_id || "-");
-      const carrier = escapeHtml(formatCarrierName(shipment.actual_carrier));
       const status = escapeHtml(formatShipmentStatus(shipment.status));
       const trackingNumber = escapeHtml(shipment.tracking_number || "-");
       const trackingUrl = shipment.tracking_number
@@ -244,7 +323,11 @@ function renderRows(shipments) {
           </td>
 
           <td>
-            <span class="carrier-pill">${carrier}</span>
+            ${renderStrategyCell(shipment)}
+          </td>
+
+          <td>
+            ${renderCarrierCell(shipment)}
           </td>
 
           <td>
@@ -375,7 +458,7 @@ function renderAdminDashboard({
         }
 
         .wrap {
-          max-width: 1520px;
+          max-width: 1600px;
           margin: 0 auto;
         }
 
@@ -459,7 +542,7 @@ function renderAdminDashboard({
           color: var(--muted);
           font-size: 17px;
           line-height: 1.7;
-          max-width: 840px;
+          max-width: 900px;
         }
 
         .stats {
@@ -655,7 +738,7 @@ function renderAdminDashboard({
           width: 100%;
           border-collapse: separate;
           border-spacing: 0;
-          min-width: 1600px;
+          min-width: 1780px;
         }
 
         thead th {
@@ -702,7 +785,9 @@ function renderAdminDashboard({
         }
 
         .order-block,
-        .tracking-block {
+        .tracking-block,
+        .carrier-block,
+        .strategy-block {
           min-width: 0;
         }
 
@@ -827,6 +912,23 @@ function renderAdminDashboard({
           color: #29415f;
           background: #f3f7fc;
           border: 1px solid #dde7f4;
+        }
+
+        .carrier-pill-selected {
+          background: #eef4ff;
+          border-color: #cfe0ff;
+          color: #1d4ed8;
+        }
+
+        .carrier-pill-actual {
+          background: #ecfdf5;
+          border-color: #ccefdc;
+          color: #047857;
+        }
+
+        .carrier-fallback-text {
+          color: #b45309;
+          font-weight: 700;
         }
 
         .sync-pill {
@@ -995,7 +1097,7 @@ function renderAdminDashboard({
         <div class="hero">
           <h1>Admin Dashboard</h1>
           <p class="subtitle">
-            Här ser du senaste ShipOne-försändelser, live carrier-status, senaste sync och tydliga driftindikatorer för problem och nästa sync.
+            Här ser du senaste ShipOne-försändelser, live carrier-status, senaste sync och tydliga driftindikatorer för problem, fallback och nästa sync.
           </p>
 
           <div class="stats">
@@ -1100,6 +1202,7 @@ function renderAdminDashboard({
                 <tr>
                   <th>Order</th>
                   <th>Health</th>
+                  <th>Strategi</th>
                   <th>Carrier</th>
                   <th>Status</th>
                   <th>Tracking</th>

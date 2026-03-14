@@ -43,6 +43,139 @@ function normalizeTestValue(value) {
   return text || null;
 }
 
+function safeJsonClone(value) {
+  if (value === undefined) return null;
+  if (value === null) return null;
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    return null;
+  }
+}
+
+function getShipOneChoiceRaw(order) {
+  const noteAttributes = Array.isArray(order?.note_attributes)
+    ? order.note_attributes
+    : [];
+
+  const match = noteAttributes.find((attribute) => {
+    const name = String(attribute?.name || "").trim().toLowerCase();
+    return name === "shipone_delivery";
+  });
+
+  const rawChoice = String(match?.value || "").trim();
+  return rawChoice || null;
+}
+
+function buildCheckoutShippingContext(order) {
+  const shippingLines = Array.isArray(order?.shipping_lines) ? order.shipping_lines : [];
+  const firstShippingLine = shippingLines[0] || null;
+  const deliveryMethod = order?.delivery_method || null;
+
+  return {
+    shipone_delivery_raw: getShipOneChoiceRaw(order),
+    shipping_lines: safeJsonClone(shippingLines),
+    first_shipping_line: firstShippingLine
+      ? {
+          code: firstShippingLine.code || null,
+          title: firstShippingLine.title || null,
+          source: firstShippingLine.source || null,
+          carrier_identifier: firstShippingLine.carrier_identifier || null,
+          requested_fulfillment_service_id:
+            firstShippingLine.requested_fulfillment_service_id || null,
+          phone: firstShippingLine.phone || null,
+          price: firstShippingLine.price || null,
+          discounted_price: firstShippingLine.discounted_price || null,
+          original_shop_price:
+            firstShippingLine.original_shop_price !== undefined
+              ? firstShippingLine.original_shop_price
+              : null,
+          original_rate_price:
+            firstShippingLine.original_rate_price !== undefined
+              ? firstShippingLine.original_rate_price
+              : null,
+          tax_lines: safeJsonClone(firstShippingLine.tax_lines),
+          discount_allocations: safeJsonClone(firstShippingLine.discount_allocations)
+        }
+      : null,
+    delivery_method: deliveryMethod
+      ? {
+          id: deliveryMethod.id || null,
+          method_type: deliveryMethod.method_type || null,
+          service_code: deliveryMethod.service_code || null,
+          presented_name: deliveryMethod.presented_name || null,
+          min_delivery_date_time: deliveryMethod.min_delivery_date_time || null,
+          max_delivery_date_time: deliveryMethod.max_delivery_date_time || null,
+          branded_promise: safeJsonClone(deliveryMethod.branded_promise),
+          source_reference: deliveryMethod.source_reference || null,
+          additional_information: safeJsonClone(deliveryMethod.additional_information)
+        }
+      : null
+  };
+}
+
+function buildShipmentAuditPayload(order, outcome = {}) {
+  return {
+    order_summary: {
+      id: order?.id || null,
+      name: order?.name || null,
+      order_number: normalizeOrderNumber(order),
+      email: order?.email || null
+    },
+    customer_summary: {
+      customer_name: buildCustomerName(order),
+      shipping_address: safeJsonClone(buildShippingAddress(order))
+    },
+    checkout_shipping_context: buildCheckoutShippingContext(order),
+    shipone_decision: {
+      normalized_choice: outcome.shipone_choice || null,
+      selected_carrier: outcome.selected_carrier || null,
+      selected_service: outcome.selected_service || null,
+      actual_carrier: outcome.actual_carrier || null,
+      fallback_used: normalizeBoolean(outcome.fallback_used),
+      fallback_from: outcome.fallback_from || null,
+      tracking_number: outcome.tracking_number || null,
+      tracking_url: outcome.tracking_url || null
+    }
+  };
+}
+
+function buildShipmentResultPayload(order, outcome = {}) {
+  const base = safeJsonClone(outcome.shipment_result) || {};
+
+  return {
+    ...base,
+    audit: buildShipmentAuditPayload(order, outcome)
+  };
+}
+
+function buildFulfillmentResultPayload(order, outcome = {}) {
+  const base = safeJsonClone(outcome.fulfillment_result) || {};
+
+  return {
+    ...base,
+    audit: buildShipmentAuditPayload(order, outcome)
+  };
+}
+
+function buildSelectedOptionPayload(order, outcome = {}) {
+  const base = safeJsonClone(outcome.selected_option) || null;
+
+  if (!base) {
+    return null;
+  }
+
+  return {
+    ...base,
+    shipone_meta: {
+      normalized_choice: outcome.shipone_choice || null,
+      raw_checkout_choice: getShipOneChoiceRaw(order),
+      checkout_shipping_context: buildCheckoutShippingContext(order)
+    }
+  };
+}
+
 async function beginOrderProcessing(order) {
   const shippingAddress = buildShippingAddress(order);
   const orderNumber = normalizeOrderNumber(order);
@@ -130,500 +263,4 @@ async function beginOrderProcessing(order) {
         shipping_country,
         status,
         retry_count,
-        created_at,
-        updated_at
-      )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8,
-        'processing',
-        0,
-        NOW(),
-        NOW()
-      )
-    `,
-    [
-      order.id,
-      order.name || null,
-      orderNumber,
-      order.email || null,
-      customerName,
-      shippingAddress.city || null,
-      shippingAddress.zip || null,
-      shippingAddress.country || null
-    ]
-  );
-
-  return {
-    started: true,
-    reason: "created"
-  };
-}
-
-async function failOrderProcessing(orderId, failureData = {}) {
-  const failedAt = failureData.failed_at || new Date().toISOString();
-
-  const result = await query(
-    `
-      UPDATE shipments
-      SET
-        order_name = COALESCE($2, order_name),
-        status = 'failed',
-        error = $3,
-        failed_at = $4,
-        updated_at = NOW()
-      WHERE order_id = $1
-      RETURNING *
-    `,
-    [
-      orderId,
-      failureData.order_name || null,
-      failureData.error || "Unknown shipment failure",
-      failedAt
-    ]
-  );
-
-  return result.rows[0] || null;
-}
-
-async function saveShipmentOutcome(order, outcome = {}) {
-  const shippingAddress = buildShippingAddress(order);
-  const orderNumber = normalizeOrderNumber(order);
-  const customerName = buildCustomerName(order);
-
-  const shipmentSuccess = normalizeBoolean(outcome.shipment_success);
-  const fulfillmentSuccess = normalizeBoolean(outcome.fulfillment_success);
-
-  let finalStatus = "failed";
-
-  if (shipmentSuccess && fulfillmentSuccess) {
-    finalStatus = "completed";
-  } else if (shipmentSuccess && !fulfillmentSuccess) {
-    finalStatus = "failed";
-  } else if (!shipmentSuccess) {
-    finalStatus = "failed";
-  }
-
-  const completedAt = finalStatus === "completed" ? new Date().toISOString() : null;
-  const failedAt = finalStatus === "failed" ? new Date().toISOString() : null;
-
-  const result = await query(
-    `
-      UPDATE shipments
-      SET
-        order_name = $2,
-        order_number = $3,
-        email = $4,
-        customer_name = $5,
-        shipping_city = $6,
-        shipping_zip = $7,
-        shipping_country = $8,
-        status = $9,
-        shipone_choice = $10,
-        selected_option = $11,
-        selected_carrier = $12,
-        selected_service = $13,
-        actual_carrier = $14,
-        fallback_used = $15,
-        fallback_from = $16,
-        tracking_number = $17,
-        tracking_url = $18,
-        shipment_success = $19,
-        fulfillment_success = $20,
-        shipment_result = $21,
-        fulfillment_result = $22,
-        error = $23,
-        completed_at = CASE
-          WHEN $24::timestamptz IS NOT NULL THEN $24::timestamptz
-          ELSE completed_at
-        END,
-        failed_at = CASE
-          WHEN $25::timestamptz IS NOT NULL THEN $25::timestamptz
-          ELSE failed_at
-        END,
-        updated_at = NOW()
-      WHERE order_id = $1
-      RETURNING *
-    `,
-    [
-      order.id,
-      order.name || null,
-      orderNumber,
-      order.email || null,
-      customerName,
-      shippingAddress.city || null,
-      shippingAddress.zip || null,
-      shippingAddress.country || null,
-      finalStatus,
-      outcome.shipone_choice || null,
-      outcome.selected_option ? JSON.stringify(outcome.selected_option) : null,
-      outcome.selected_carrier || null,
-      outcome.selected_service || null,
-      outcome.actual_carrier || null,
-      normalizeBoolean(outcome.fallback_used),
-      outcome.fallback_from || null,
-      outcome.tracking_number || null,
-      outcome.tracking_url || null,
-      shipmentSuccess,
-      fulfillmentSuccess,
-      outcome.shipment_result ? JSON.stringify(outcome.shipment_result) : null,
-      outcome.fulfillment_result ? JSON.stringify(outcome.fulfillment_result) : null,
-      outcome.error || null,
-      completedAt,
-      failedAt
-    ]
-  );
-
-  return result.rows[0] || null;
-}
-
-async function createDHLTestShipment(testData = {}) {
-  const orderId = normalizeTestValue(testData.order_id) || buildGeneratedTestOrderId();
-  const orderNumber =
-    testData.order_number !== undefined && testData.order_number !== null
-      ? Number(testData.order_number)
-      : buildGeneratedTestOrderNumber(orderId);
-
-  const safeOrderNumber = Number.isNaN(orderNumber) ? null : orderNumber;
-  const trackingNumber = normalizeTestValue(testData.tracking_number);
-
-  if (!trackingNumber) {
-    throw new Error("Missing DHL tracking number");
-  }
-
-  const orderName =
-    normalizeTestValue(testData.order_name) || `#DHL-TEST-${String(orderId).slice(-6)}`;
-
-  const email = normalizeTestValue(testData.email) || "dhl-test@shipone.local";
-  const customerName = normalizeTestValue(testData.customer_name) || "DHL Test Customer";
-  const shippingCity = normalizeTestValue(testData.shipping_city) || "Stockholm";
-  const shippingZip = normalizeTestValue(testData.shipping_zip) || "111 22";
-  const shippingCountry = normalizeTestValue(testData.shipping_country) || "Sweden";
-  const selectedService =
-    normalizeTestValue(testData.selected_service) || "DHL Parcel Test";
-  const shiponeChoice = normalizeTestValue(testData.shipone_choice) || "DHL_TEST";
-
-  const selectedOption = {
-    id: "DHL_TEST",
-    name: selectedService,
-    carrier: "dhl",
-    price: 0,
-    eta_days: null,
-    co2: null
-  };
-
-  const shipmentResult = {
-    success: true,
-    carrier: "dhl",
-    mode: "manual_test",
-    data: {
-      trackingNumber,
-      trackingUrl: null
-    }
-  };
-
-  const fulfillmentResult = {
-    success: true,
-    mode: "manual_test",
-    note: "Created as isolated DHL test shipment in admin-safe flow"
-  };
-
-  const result = await query(
-    `
-      INSERT INTO shipments (
-        order_id,
-        order_name,
-        order_number,
-        email,
-        customer_name,
-        shipping_city,
-        shipping_zip,
-        shipping_country,
-        status,
-        retry_count,
-        shipone_choice,
-        selected_option,
-        selected_carrier,
-        selected_service,
-        actual_carrier,
-        fallback_used,
-        fallback_from,
-        tracking_number,
-        tracking_url,
-        shipment_success,
-        fulfillment_success,
-        shipment_result,
-        fulfillment_result,
-        error,
-        carrier_status_text,
-        carrier_last_event_at,
-        carrier_event_count,
-        carrier_last_synced_at,
-        carrier_next_sync_at,
-        carrier_sync_attempts,
-        carrier_last_sync_status,
-        created_at,
-        updated_at,
-        completed_at,
-        failed_at
-      )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8,
-        'completed',
-        0,
-        $9,
-        $10,
-        'dhl',
-        $11,
-        'dhl',
-        false,
-        NULL,
-        $12,
-        NULL,
-        true,
-        true,
-        $13,
-        $14,
-        NULL,
-        NULL,
-        NULL,
-        0,
-        NULL,
-        NOW(),
-        0,
-        NULL,
-        NOW(),
-        NOW(),
-        NOW(),
-        NULL
-      )
-      ON CONFLICT (order_id)
-      DO UPDATE SET
-        order_name = EXCLUDED.order_name,
-        order_number = EXCLUDED.order_number,
-        email = EXCLUDED.email,
-        customer_name = EXCLUDED.customer_name,
-        shipping_city = EXCLUDED.shipping_city,
-        shipping_zip = EXCLUDED.shipping_zip,
-        shipping_country = EXCLUDED.shipping_country,
-        status = EXCLUDED.status,
-        retry_count = 0,
-        shipone_choice = EXCLUDED.shipone_choice,
-        selected_option = EXCLUDED.selected_option,
-        selected_carrier = EXCLUDED.selected_carrier,
-        selected_service = EXCLUDED.selected_service,
-        actual_carrier = EXCLUDED.actual_carrier,
-        fallback_used = EXCLUDED.fallback_used,
-        fallback_from = EXCLUDED.fallback_from,
-        tracking_number = EXCLUDED.tracking_number,
-        tracking_url = EXCLUDED.tracking_url,
-        shipment_success = EXCLUDED.shipment_success,
-        fulfillment_success = EXCLUDED.fulfillment_success,
-        shipment_result = EXCLUDED.shipment_result,
-        fulfillment_result = EXCLUDED.fulfillment_result,
-        error = NULL,
-        carrier_status_text = NULL,
-        carrier_last_event_at = NULL,
-        carrier_event_count = 0,
-        carrier_last_synced_at = NULL,
-        carrier_next_sync_at = NOW(),
-        carrier_sync_attempts = 0,
-        carrier_last_sync_status = NULL,
-        completed_at = NOW(),
-        failed_at = NULL,
-        updated_at = NOW()
-      RETURNING *
-    `,
-    [
-      orderId,
-      orderName,
-      safeOrderNumber,
-      email,
-      customerName,
-      shippingCity,
-      shippingZip,
-      shippingCountry,
-      shiponeChoice,
-      JSON.stringify(selectedOption),
-      selectedService,
-      trackingNumber,
-      JSON.stringify(shipmentResult),
-      JSON.stringify(fulfillmentResult)
-    ]
-  );
-
-  return result.rows[0] || null;
-}
-
-async function deleteShipmentByOrderId(orderId) {
-  const result = await query(
-    `
-      DELETE FROM shipments
-      WHERE order_id = $1
-      RETURNING *
-    `,
-    [orderId]
-  );
-
-  return result.rows[0] || null;
-}
-
-async function readShipments() {
-  const result = await query(
-    `
-      SELECT
-        id,
-        order_id,
-        order_name,
-        order_number,
-        email,
-        customer_name,
-        shipping_city,
-        shipping_zip,
-        shipping_country,
-        status,
-        retry_count,
-        shipone_choice,
-        selected_option,
-        selected_carrier,
-        selected_service,
-        actual_carrier,
-        fallback_used,
-        fallback_from,
-        tracking_number,
-        tracking_url,
-        shipment_success,
-        fulfillment_success,
-        shipment_result,
-        fulfillment_result,
-        error,
-        carrier_status_text,
-        carrier_last_event_at,
-        carrier_event_count,
-        carrier_last_synced_at,
-        carrier_next_sync_at,
-        carrier_sync_attempts,
-        carrier_last_sync_status,
-        created_at,
-        updated_at,
-        completed_at,
-        failed_at
-      FROM shipments
-      ORDER BY created_at DESC, id DESC
-    `
-  );
-
-  return result.rows;
-}
-
-async function findShipmentByOrderId(orderId) {
-  const result = await query(
-    `
-      SELECT
-        id,
-        order_id,
-        order_name,
-        order_number,
-        email,
-        customer_name,
-        shipping_city,
-        shipping_zip,
-        shipping_country,
-        status,
-        retry_count,
-        shipone_choice,
-        selected_option,
-        selected_carrier,
-        selected_service,
-        actual_carrier,
-        fallback_used,
-        fallback_from,
-        tracking_number,
-        tracking_url,
-        shipment_success,
-        fulfillment_success,
-        shipment_result,
-        fulfillment_result,
-        error,
-        carrier_status_text,
-        carrier_last_event_at,
-        carrier_event_count,
-        carrier_last_synced_at,
-        carrier_next_sync_at,
-        carrier_sync_attempts,
-        carrier_last_sync_status,
-        created_at,
-        updated_at,
-        completed_at,
-        failed_at
-      FROM shipments
-      WHERE order_id = $1
-      LIMIT 1
-    `,
-    [orderId]
-  );
-
-  return result.rows[0] || null;
-}
-
-async function getRecentShipments(limit = 20) {
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
-
-  const result = await query(
-    `
-      SELECT
-        id,
-        order_id,
-        order_name,
-        order_number,
-        email,
-        customer_name,
-        shipping_city,
-        shipping_zip,
-        shipping_country,
-        status,
-        retry_count,
-        shipone_choice,
-        selected_option,
-        selected_carrier,
-        selected_service,
-        actual_carrier,
-        fallback_used,
-        fallback_from,
-        tracking_number,
-        tracking_url,
-        shipment_success,
-        fulfillment_success,
-        shipment_result,
-        fulfillment_result,
-        error,
-        carrier_status_text,
-        carrier_last_event_at,
-        carrier_event_count,
-        carrier_last_synced_at,
-        carrier_next_sync_at,
-        carrier_sync_attempts,
-        carrier_last_sync_status,
-        created_at,
-        updated_at,
-        completed_at,
-        failed_at
-      FROM shipments
-      ORDER BY created_at DESC, id DESC
-      LIMIT $1
-    `,
-    [safeLimit]
-  );
-
-  return result.rows;
-}
-
-module.exports = {
-  beginOrderProcessing,
-  failOrderProcessing,
-  saveShipmentOutcome,
-  createDHLTestShipment,
-  deleteShipmentByOrderId,
-  readShipments,
-  findShipmentByOrderId,
-  getRecentShipments
-};
+       

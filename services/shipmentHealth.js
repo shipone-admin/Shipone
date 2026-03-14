@@ -68,6 +68,13 @@ function getShipmentHealth(shipment) {
   const carrierEventCount = Number(shipment?.carrier_event_count ?? 0);
   const syncAttempts = Number(shipment?.carrier_sync_attempts ?? 0);
 
+  const hasAnySyncData =
+    Boolean(syncStatus) ||
+    Boolean(carrierLastSyncedAt) ||
+    Boolean(carrierNextSyncAt) ||
+    carrierEventCount > 0 ||
+    Boolean(carrierStatusText);
+
   if (!trackingNumber) {
     return {
       health: "problem",
@@ -85,6 +92,16 @@ function getShipmentHealth(shipment) {
       healthCode: "failed_state",
       healthReason: "Shipment eller tracking-sync är markerad som misslyckad.",
       healthClass: getHealthBadgeClass("problem")
+    };
+  }
+
+  if (!hasAnySyncData && shipmentStatus === "completed") {
+    return {
+      health: "waiting",
+      healthLabel: "Väntar",
+      healthCode: "awaiting_first_sync",
+      healthReason: "Shipmentet är skapat men väntar ännu på första tracking-sync från transportören.",
+      healthClass: getHealthBadgeClass("waiting")
     };
   }
 
@@ -144,6 +161,16 @@ function getShipmentHealth(shipment) {
       healthLabel: "Väntar",
       healthCode: "processing_without_events",
       healthReason: "Shipmentet behandlas men saknar ännu registrerade carrier-events.",
+      healthClass: getHealthBadgeClass("waiting")
+    };
+  }
+
+  if (syncStatus === "success" && carrierEventCount === 0 && shipmentStatus === "completed") {
+    return {
+      health: "waiting",
+      healthLabel: "Väntar",
+      healthCode: "completed_without_events",
+      healthReason: "Shipmentet är slutfört men transportören har ännu inte visat någon första händelse.",
       healthClass: getHealthBadgeClass("waiting")
     };
   }

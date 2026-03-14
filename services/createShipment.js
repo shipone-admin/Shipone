@@ -79,35 +79,40 @@ async function createShipment(order, selectedOption) {
   if (!selectedOption || !selectedOption.carrier) {
     return {
       success: false,
+      carrier: null,
+      selected_carrier: null,
+      selected_service: null,
+      fallbackUsed: false,
+      fallbackFrom: null,
       error: "Missing selected shipping option or carrier"
     };
   }
 
   const preferredCarrier = String(selectedOption.carrier).toLowerCase();
+  const selectedService = selectedOption.name || null;
 
   console.log("🎯 Preferred carrier:", preferredCarrier);
-  console.log("🎯 Preferred service:", selectedOption.name || "Unknown");
+  console.log("🎯 Preferred service:", selectedService || "Unknown");
 
   const fallbackChain = buildFallbackChain(preferredCarrier);
 
   console.log("🛟 Fallback chain:", fallbackChain.join(" -> ") || "none");
 
-  // 1) Try preferred carrier first
   try {
     const preferredResult = await runCarrierAttempt(preferredCarrier, order);
 
     return {
       ...preferredResult,
       selected_carrier: preferredCarrier,
-      selected_service: selectedOption.name || null,
-      fallbackUsed: false
+      selected_service: selectedService,
+      fallbackUsed: false,
+      fallbackFrom: null
     };
   } catch (error) {
     console.log(`❌ ${preferredCarrier.toUpperCase()} failed — activating fallback`);
     console.log("Reason:", error.message);
   }
 
-  // 2) Try enabled fallback carriers only
   for (const fallbackCarrier of fallbackChain) {
     try {
       console.log(`📡 Trying fallback carrier: ${fallbackCarrier}`);
@@ -117,7 +122,7 @@ async function createShipment(order, selectedOption) {
       return {
         ...fallbackResult,
         selected_carrier: preferredCarrier,
-        selected_service: selectedOption.name || null,
+        selected_service: selectedService,
         fallbackUsed: true,
         fallbackFrom: preferredCarrier
       };
@@ -129,8 +134,11 @@ async function createShipment(order, selectedOption) {
 
   return {
     success: false,
+    carrier: null,
     selected_carrier: preferredCarrier,
-    selected_service: selectedOption.name || null,
+    selected_service: selectedService,
+    fallbackUsed: false,
+    fallbackFrom: null,
     error: "All enabled carriers failed"
   };
 }

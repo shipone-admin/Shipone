@@ -52,6 +52,41 @@ function getHealthBadgeClass(health) {
   return "health-neutral";
 }
 
+function getWaitingReason(shipment, fallbackUsed) {
+  const shipmentStatus = normalizeText(shipment?.status);
+  const carrierEventCount = Number(shipment?.carrier_event_count ?? 0);
+
+  if (fallbackUsed && shipmentStatus === "completed" && carrierEventCount === 0) {
+    return {
+      health: "waiting",
+      healthLabel: "Väntar",
+      healthCode: "fallback_awaiting_first_event",
+      healthReason:
+        "Fallback till faktisk transportör användes korrekt, men första carrier-händelsen har ännu inte registrerats.",
+      healthClass: getHealthBadgeClass("waiting")
+    };
+  }
+
+  if (fallbackUsed) {
+    return {
+      health: "waiting",
+      healthLabel: "Väntar",
+      healthCode: "fallback_awaiting_progress",
+      healthReason:
+        "Fallback till faktisk transportör användes korrekt. Transportören har ännu inte registrerat progression i flödet.",
+      healthClass: getHealthBadgeClass("waiting")
+    };
+  }
+
+  return {
+    health: "waiting",
+    healthLabel: "Väntar",
+    healthCode: "awaiting_progress",
+    healthReason: "Transportören har ännu inte registrerat progression i flödet.",
+    healthClass: getHealthBadgeClass("waiting")
+  };
+}
+
 function getShipmentHealth(shipment) {
   const now = new Date();
 
@@ -67,6 +102,7 @@ function getShipmentHealth(shipment) {
   const hoursSinceLastSync = diffHours(carrierLastSyncedAt, now);
   const carrierEventCount = Number(shipment?.carrier_event_count ?? 0);
   const syncAttempts = Number(shipment?.carrier_sync_attempts ?? 0);
+  const fallbackUsed = Boolean(shipment?.fallback_used);
 
   const hasAnySyncData =
     Boolean(syncStatus) ||
@@ -96,6 +132,17 @@ function getShipmentHealth(shipment) {
   }
 
   if (!hasAnySyncData && shipmentStatus === "completed") {
+    if (fallbackUsed) {
+      return {
+        health: "waiting",
+        healthLabel: "Väntar",
+        healthCode: "fallback_awaiting_first_sync",
+        healthReason:
+          "Fallback till faktisk transportör användes korrekt, men första tracking-sync har ännu inte registrerats.",
+        healthClass: getHealthBadgeClass("waiting")
+      };
+    }
+
     return {
       health: "waiting",
       healthLabel: "Väntar",
@@ -106,13 +153,7 @@ function getShipmentHealth(shipment) {
   }
 
   if (isWaitingCarrierText(carrierStatusText)) {
-    return {
-      health: "waiting",
-      healthLabel: "Väntar",
-      healthCode: "awaiting_progress",
-      healthReason: "Transportören har ännu inte registrerat progression i flödet.",
-      healthClass: getHealthBadgeClass("waiting")
-    };
+    return getWaitingReason(shipment, fallbackUsed);
   }
 
   if (!carrier && syncStatus === "success") {
@@ -156,6 +197,17 @@ function getShipmentHealth(shipment) {
   }
 
   if (syncStatus === "success" && carrierEventCount === 0 && shipmentStatus === "processing") {
+    if (fallbackUsed) {
+      return {
+        health: "waiting",
+        healthLabel: "Väntar",
+        healthCode: "fallback_processing_without_events",
+        healthReason:
+          "Fallback till faktisk transportör användes korrekt, men shipmentet saknar ännu registrerade carrier-events.",
+        healthClass: getHealthBadgeClass("waiting")
+      };
+    }
+
     return {
       health: "waiting",
       healthLabel: "Väntar",
@@ -166,6 +218,17 @@ function getShipmentHealth(shipment) {
   }
 
   if (syncStatus === "success" && carrierEventCount === 0 && shipmentStatus === "completed") {
+    if (fallbackUsed) {
+      return {
+        health: "waiting",
+        healthLabel: "Väntar",
+        healthCode: "fallback_completed_without_events",
+        healthReason:
+          "Fallback till faktisk transportör användes korrekt, men transportören har ännu inte visat någon första händelse.",
+        healthClass: getHealthBadgeClass("waiting")
+      };
+    }
+
     return {
       health: "waiting",
       healthLabel: "Väntar",

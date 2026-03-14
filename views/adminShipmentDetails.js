@@ -51,6 +51,20 @@ function formatShipmentStatus(status) {
   return status || "-";
 }
 
+function formatChoice(choice) {
+  const normalized = String(choice || "").toUpperCase();
+
+  if (normalized === "FAST") return "Fast";
+  if (normalized === "FASTEST") return "Fast";
+  if (normalized === "CHEAP") return "Cheap";
+  if (normalized === "CHEAPEST") return "Cheap";
+  if (normalized === "GREEN") return "Smart";
+  if (normalized === "SMART") return "Smart";
+  if (normalized === "DHL_TEST") return "DHL Test";
+
+  return choice || "-";
+}
+
 function getStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
 
@@ -85,6 +99,8 @@ function getEventStateClass(status) {
 function getEventSourceLabel(source) {
   if (source === "shopify") return "Shopify";
   if (source === "postnord") return "PostNord";
+  if (source === "dhl") return "DHL";
+  if (source === "budbee") return "Budbee";
   if (source === "carrier") return "Transportör";
   return "ShipOne";
 }
@@ -182,6 +198,58 @@ function renderHealthPanel(shipment) {
   `;
 }
 
+function renderRoutingPanel(shipment) {
+  const shiponeChoice = escapeHtml(formatChoice(shipment.shipone_choice));
+  const selectedCarrier = escapeHtml(formatCarrierName(shipment.selected_carrier));
+  const selectedService = escapeHtml(shipment.selected_service || "-");
+  const actualCarrier = escapeHtml(formatCarrierName(shipment.actual_carrier));
+  const actualService = escapeHtml(
+    shipment.shipment_result?.selected_service ||
+      shipment.selected_service ||
+      "-"
+  );
+  const fallbackUsed = Boolean(shipment.fallback_used);
+  const fallbackFrom = escapeHtml(formatCarrierName(shipment.fallback_from));
+  const fallbackTo = escapeHtml(formatCarrierName(shipment.actual_carrier));
+
+  return `
+    <div class="card full-width">
+      <h2 class="card-title">Routing & carrier-val</h2>
+
+      <div class="routing-grid">
+        <div class="routing-box">
+          <div class="routing-label">ShipOne-val</div>
+          <div class="routing-value">${shiponeChoice}</div>
+        </div>
+
+        <div class="routing-box routing-box-selected">
+          <div class="routing-label">Vald carrier</div>
+          <div class="routing-value">${selectedCarrier}</div>
+          <div class="routing-subvalue">Tjänst: ${selectedService}</div>
+        </div>
+
+        <div class="routing-box routing-box-actual">
+          <div class="routing-label">Faktisk carrier</div>
+          <div class="routing-value">${actualCarrier}</div>
+          <div class="routing-subvalue">Tjänst: ${escapeHtml(actualService)}</div>
+        </div>
+
+        <div class="routing-box">
+          <div class="routing-label">Fallback</div>
+          <div class="routing-value">${fallbackUsed ? "Ja" : "Nej"}</div>
+          <div class="routing-subvalue">
+            ${
+              fallbackUsed
+                ? `Från ${fallbackFrom} till ${fallbackTo}`
+                : "Ingen fallback använd"
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderAdminShipmentDetails({
   shipment,
   events = [],
@@ -237,6 +305,10 @@ function renderAdminShipmentDetails({
           --info-bg: #eff6ff;
           --info-text: #1d4ed8;
           --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+          --selected-bg: #eef4ff;
+          --selected-line: #c7d7fe;
+          --actual-bg: #ecfdf5;
+          --actual-line: #b7e4cb;
         }
 
         * {
@@ -468,6 +540,51 @@ function renderAdminShipmentDetails({
           font-size: 17px;
         }
 
+        .routing-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 14px;
+        }
+
+        .routing-box {
+          border: 1px solid var(--line);
+          background: #fbfdff;
+          border-radius: 18px;
+          padding: 16px;
+        }
+
+        .routing-box-selected {
+          background: var(--selected-bg);
+          border-color: var(--selected-line);
+        }
+
+        .routing-box-actual {
+          background: var(--actual-bg);
+          border-color: var(--actual-line);
+        }
+
+        .routing-label {
+          font-size: 12px;
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 700;
+          margin-bottom: 8px;
+        }
+
+        .routing-value {
+          font-size: 24px;
+          font-weight: 800;
+          line-height: 1.15;
+          margin-bottom: 8px;
+        }
+
+        .routing-subvalue {
+          font-size: 14px;
+          line-height: 1.5;
+          color: var(--muted);
+        }
+
         .json-block {
           margin: 0;
           background: #0f172a;
@@ -610,6 +727,12 @@ function renderAdminShipmentDetails({
           color: var(--neutral-text);
         }
 
+        @media (max-width: 1120px) {
+          .routing-grid {
+            grid-template-columns: 1fr 1fr;
+          }
+        }
+
         @media (max-width: 980px) {
           .grid {
             grid-template-columns: 1fr;
@@ -624,6 +747,10 @@ function renderAdminShipmentDetails({
           .info-row {
             grid-template-columns: 1fr;
             gap: 6px;
+          }
+
+          .routing-grid {
+            grid-template-columns: 1fr;
           }
         }
       </style>
@@ -673,6 +800,7 @@ function renderAdminShipmentDetails({
 
         <div class="grid">
           ${renderHealthPanel(enrichedShipment)}
+          ${renderRoutingPanel(enrichedShipment)}
 
           <div class="card">
             <h2 class="card-title">Grundinformation</h2>

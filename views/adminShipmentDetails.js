@@ -198,22 +198,66 @@ function renderHealthPanel(shipment) {
   `;
 }
 
+function getRoutingSnapshot(shipment) {
+  return shipment?.shipment_result?.routing_snapshot || null;
+}
+
+function getOrderSnapshot(shipment) {
+  return shipment?.shipment_result?.order_snapshot || null;
+}
+
 function renderRoutingPanel(shipment) {
-  const shiponeChoice = escapeHtml(formatChoice(shipment.shipone_choice));
-  const selectedCarrier = escapeHtml(formatCarrierName(shipment.selected_carrier));
-  const selectedService = escapeHtml(shipment.selected_service || "-");
-  const actualCarrier = escapeHtml(formatCarrierName(shipment.actual_carrier));
-  const fallbackUsed = Boolean(shipment.fallback_used);
-  const fallbackFrom = escapeHtml(formatCarrierName(shipment.fallback_from));
-  const fallbackTo = escapeHtml(formatCarrierName(shipment.actual_carrier));
+  const routingSnapshot = getRoutingSnapshot(shipment);
+
+  const shiponeChoice = escapeHtml(
+    formatChoice(
+      routingSnapshot?.shipone_choice_normalized || shipment.shipone_choice
+    )
+  );
+
+  const selectedCarrier = escapeHtml(
+    formatCarrierName(
+      routingSnapshot?.selected_carrier || shipment.selected_carrier
+    )
+  );
+
+  const selectedService = escapeHtml(
+    routingSnapshot?.selected_service || shipment.selected_service || "-"
+  );
+
+  const actualCarrier = escapeHtml(
+    formatCarrierName(
+      routingSnapshot?.actual_carrier || shipment.actual_carrier
+    )
+  );
+
+  const actualCarrierRaw = String(
+    routingSnapshot?.actual_carrier || shipment.actual_carrier || ""
+  ).toLowerCase();
+
+  const fallbackUsed = Boolean(
+    routingSnapshot?.fallback_used ?? shipment.fallback_used
+  );
+
+  const fallbackFrom = escapeHtml(
+    formatCarrierName(
+      routingSnapshot?.fallback_from || shipment.fallback_from
+    )
+  );
+
+  const fallbackTo = escapeHtml(
+    formatCarrierName(
+      routingSnapshot?.actual_carrier || shipment.actual_carrier
+    )
+  );
 
   let actualServiceLabel = "Tjänst ej specificerad";
 
-  if (shipment.actual_carrier === "postnord") {
+  if (actualCarrierRaw === "postnord") {
     actualServiceLabel = "PostNord-shipment skapad";
-  } else if (shipment.actual_carrier === "dhl") {
+  } else if (actualCarrierRaw === "dhl") {
     actualServiceLabel = "DHL-shipment skapad";
-  } else if (shipment.actual_carrier === "budbee") {
+  } else if (actualCarrierRaw === "budbee") {
     actualServiceLabel = "Budbee-shipment skapad";
   }
 
@@ -250,6 +294,99 @@ function renderRoutingPanel(shipment) {
             }
           </div>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCheckoutSnapshotPanel(shipment) {
+  const orderSnapshot = getOrderSnapshot(shipment);
+  const routingSnapshot = getRoutingSnapshot(shipment);
+
+  if (!orderSnapshot && !routingSnapshot) {
+    return `
+      <div class="card full-width">
+        <h2 class="card-title">Checkout & webhook snapshot</h2>
+        <div class="empty-note">
+          Ingen sparad checkout/webhook-snapshot finns för detta shipment ännu.
+        </div>
+      </div>
+    `;
+  }
+
+  const firstShippingLine = orderSnapshot?.first_shipping_line || null;
+  const shippingLines = Array.isArray(orderSnapshot?.shipping_lines)
+    ? orderSnapshot.shipping_lines
+    : [];
+
+  const shippingLinesHtml =
+    shippingLines.length > 0
+      ? shippingLines
+          .map((line, index) => {
+            return `
+              <div class="snapshot-line">
+                <div class="snapshot-line-title">Shipping line ${index + 1}</div>
+                <div class="snapshot-line-meta">
+                  Titel: ${escapeHtml(line?.title || "-")}<br />
+                  Code: ${escapeHtml(line?.code || "-")}<br />
+                  Source: ${escapeHtml(line?.source || "-")}<br />
+                  Pris: ${escapeHtml(line?.price || "-")}
+                </div>
+              </div>
+            `;
+          })
+          .join("")
+      : `<div class="empty-note">Inga shipping_lines sparade.</div>`;
+
+  return `
+    <div class="card full-width">
+      <h2 class="card-title">Checkout & webhook snapshot</h2>
+
+      <div class="info-list">
+        <div class="info-row">
+          <div class="label">Cart-val från kund</div>
+          <div class="value">${escapeHtml(orderSnapshot?.shipone_delivery_raw || routingSnapshot?.shipone_delivery_raw || "-")}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Normaliserat ShipOne-val</div>
+          <div class="value">${escapeHtml(formatChoice(routingSnapshot?.shipone_choice_normalized || shipment.shipone_choice || "-"))}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Shopify shipping line</div>
+          <div class="value">
+            ${
+              firstShippingLine
+                ? `
+                  Titel: ${escapeHtml(firstShippingLine.title || "-")}<br />
+                  Code: ${escapeHtml(firstShippingLine.code || "-")}<br />
+                  Source: ${escapeHtml(firstShippingLine.source || "-")}<br />
+                  Pris: ${escapeHtml(firstShippingLine.price || "-")}
+                `
+                : "Ingen first_shipping_line sparad"
+            }
+          </div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Antal shipping lines</div>
+          <div class="value">${escapeHtml(String(shippingLines.length))}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Webhook ordernamn</div>
+          <div class="value">${escapeHtml(orderSnapshot?.name || shipment.order_name || "-")}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Webhook order ID</div>
+          <div class="value">${escapeHtml(orderSnapshot?.id || shipment.order_id || "-")}</div>
+        </div>
+      </div>
+
+      <div class="snapshot-lines-wrap">
+        ${shippingLinesHtml}
       </div>
     </div>
   `;
@@ -590,6 +727,31 @@ function renderAdminShipmentDetails({
           color: var(--muted);
         }
 
+        .snapshot-lines-wrap {
+          display: grid;
+          gap: 12px;
+          margin-top: 18px;
+        }
+
+        .snapshot-line {
+          border: 1px solid #e6edf5;
+          background: #fbfdff;
+          border-radius: 16px;
+          padding: 14px;
+        }
+
+        .snapshot-line-title {
+          font-size: 14px;
+          font-weight: 800;
+          margin-bottom: 6px;
+        }
+
+        .snapshot-line-meta {
+          font-size: 14px;
+          line-height: 1.6;
+          color: var(--muted);
+        }
+
         .json-block {
           margin: 0;
           background: #0f172a;
@@ -806,6 +968,7 @@ function renderAdminShipmentDetails({
         <div class="grid">
           ${renderHealthPanel(enrichedShipment)}
           ${renderRoutingPanel(enrichedShipment)}
+          ${renderCheckoutSnapshotPanel(enrichedShipment)}
 
           <div class="card">
             <h2 class="card-title">Grundinformation</h2>

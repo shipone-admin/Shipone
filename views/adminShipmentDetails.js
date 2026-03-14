@@ -203,14 +203,19 @@ function renderRoutingPanel(shipment) {
   const selectedCarrier = escapeHtml(formatCarrierName(shipment.selected_carrier));
   const selectedService = escapeHtml(shipment.selected_service || "-");
   const actualCarrier = escapeHtml(formatCarrierName(shipment.actual_carrier));
-  const actualService = escapeHtml(
-    shipment.shipment_result?.selected_service ||
-      shipment.selected_service ||
-      "-"
-  );
   const fallbackUsed = Boolean(shipment.fallback_used);
   const fallbackFrom = escapeHtml(formatCarrierName(shipment.fallback_from));
   const fallbackTo = escapeHtml(formatCarrierName(shipment.actual_carrier));
+
+  let actualServiceLabel = "Tjänst ej specificerad";
+
+  if (shipment.actual_carrier === "postnord") {
+    actualServiceLabel = "PostNord-shipment skapad";
+  } else if (shipment.actual_carrier === "dhl") {
+    actualServiceLabel = "DHL-shipment skapad";
+  } else if (shipment.actual_carrier === "budbee") {
+    actualServiceLabel = "Budbee-shipment skapad";
+  }
 
   return `
     <div class="card full-width">
@@ -225,13 +230,13 @@ function renderRoutingPanel(shipment) {
         <div class="routing-box routing-box-selected">
           <div class="routing-label">Vald carrier</div>
           <div class="routing-value">${selectedCarrier}</div>
-          <div class="routing-subvalue">Tjänst: ${selectedService}</div>
+          <div class="routing-subvalue">Vald tjänst: ${selectedService}</div>
         </div>
 
         <div class="routing-box routing-box-actual">
           <div class="routing-label">Faktisk carrier</div>
           <div class="routing-value">${actualCarrier}</div>
-          <div class="routing-subvalue">Tjänst: ${escapeHtml(actualService)}</div>
+          <div class="routing-subvalue">Faktisk tjänst: ${escapeHtml(actualServiceLabel)}</div>
         </div>
 
         <div class="routing-box">

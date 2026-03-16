@@ -139,8 +139,11 @@ function renderAdminMerchantsPage({
   merchants = [],
   stores = [],
   flashMessage = "",
-  flashType = "success"
+  flashType = "success",
+  token = ""
 } = {}) {
+  const safeToken = escapeHtml(token);
+
   return `
     <!DOCTYPE html>
     <html lang="sv">
@@ -481,6 +484,8 @@ function renderAdminMerchantsPage({
               <h2 class="card-title">Skapa eller uppdatera merchant</h2>
 
               <form class="form-grid" method="POST" action="/admin/merchants/upsert">
+                <input type="hidden" name="token" value="${safeToken}" />
+
                 <div class="field">
                   <label for="merchant-id">Merchant ID</label>
                   <input
@@ -524,6 +529,8 @@ function renderAdminMerchantsPage({
               <h2 class="card-title">Koppla Shopify store till merchant</h2>
 
               <form class="form-grid" method="POST" action="/admin/merchants/store/upsert">
+                <input type="hidden" name="token" value="${safeToken}" />
+
                 <div class="field">
                   <label for="store-shop-domain">Shop domain</label>
                   <input

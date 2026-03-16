@@ -43,6 +43,16 @@ function normalizeTestValue(value) {
   return text || null;
 }
 
+function normalizeMerchantContext(context = {}) {
+  const merchantId = String(context.merchant_id || "default").trim() || "default";
+  const shopDomain = String(context.shop_domain || "").trim().toLowerCase() || null;
+
+  return {
+    merchant_id: merchantId,
+    shop_domain: shopDomain
+  };
+}
+
 function buildOrderSnapshot(order) {
   const shippingLines = Array.isArray(order?.shipping_lines)
     ? order.shipping_lines.map((line) => ({
@@ -83,16 +93,19 @@ function buildRoutingSnapshot(outcome = {}) {
   };
 }
 
-async function beginOrderProcessing(order) {
+async function beginOrderProcessing(order, merchantContext = {}) {
   const shippingAddress = buildShippingAddress(order);
   const orderNumber = normalizeOrderNumber(order);
   const customerName = buildCustomerName(order);
+  const normalizedMerchant = normalizeMerchantContext(merchantContext);
 
   const existingResult = await query(
     `
       SELECT
         id,
         order_id,
+        merchant_id,
+        shop_domain,
         status
       FROM shipments
       WHERE order_id = $1
@@ -125,13 +138,15 @@ async function beginOrderProcessing(order) {
       `
         UPDATE shipments
         SET
-          order_name = $2,
-          order_number = $3,
-          email = $4,
-          customer_name = $5,
-          shipping_city = $6,
-          shipping_zip = $7,
-          shipping_country = $8,
+          merchant_id = $2,
+          shop_domain = $3,
+          order_name = $4,
+          order_number = $5,
+          email = $6,
+          customer_name = $7,
+          shipping_city = $8,
+          shipping_zip = $9,
+          shipping_country = $10,
           status = 'processing',
           retry_count = COALESCE(retry_count, 0) + 1,
           error = NULL,
@@ -141,6 +156,8 @@ async function beginOrderProcessing(order) {
       `,
       [
         order.id,
+        normalizedMerchant.merchant_id,
+        normalizedMerchant.shop_domain,
         order.name || null,
         orderNumber,
         order.email || null,
@@ -161,6 +178,8 @@ async function beginOrderProcessing(order) {
     `
       INSERT INTO shipments (
         order_id,
+        merchant_id,
+        shop_domain,
         order_name,
         order_number,
         email,
@@ -174,7 +193,7 @@ async function beginOrderProcessing(order) {
         updated_at
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8,
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         'processing',
         0,
         NOW(),
@@ -183,6 +202,8 @@ async function beginOrderProcessing(order) {
     `,
     [
       order.id,
+      normalizedMerchant.merchant_id,
+      normalizedMerchant.shop_domain,
       order.name || null,
       orderNumber,
       order.email || null,
@@ -199,23 +220,28 @@ async function beginOrderProcessing(order) {
   };
 }
 
-async function failOrderProcessing(orderId, failureData = {}) {
+async function failOrderProcessing(orderId, failureData = {}, merchantContext = {}) {
   const failedAt = failureData.failed_at || new Date().toISOString();
+  const normalizedMerchant = normalizeMerchantContext(merchantContext);
 
   const result = await query(
     `
       UPDATE shipments
       SET
-        order_name = COALESCE($2, order_name),
+        merchant_id = COALESCE($2, merchant_id),
+        shop_domain = COALESCE($3, shop_domain),
+        order_name = COALESCE($4, order_name),
         status = 'failed',
-        error = $3,
-        failed_at = $4,
+        error = $5,
+        failed_at = $6,
         updated_at = NOW()
       WHERE order_id = $1
       RETURNING *
     `,
     [
       orderId,
+      normalizedMerchant.merchant_id || null,
+      normalizedMerchant.shop_domain || null,
       failureData.order_name || null,
       failureData.error || "Unknown shipment failure",
       failedAt
@@ -225,10 +251,11 @@ async function failOrderProcessing(orderId, failureData = {}) {
   return result.rows[0] || null;
 }
 
-async function saveShipmentOutcome(order, outcome = {}) {
+async function saveShipmentOutcome(order, outcome = {}, merchantContext = {}) {
   const shippingAddress = buildShippingAddress(order);
   const orderNumber = normalizeOrderNumber(order);
   const customerName = buildCustomerName(order);
+  const normalizedMerchant = normalizeMerchantContext(merchantContext);
 
   const shipmentSuccess = normalizeBoolean(outcome.shipment_success);
   const fulfillmentSuccess = normalizeBoolean(outcome.fulfillment_success);
@@ -250,7 +277,11 @@ async function saveShipmentOutcome(order, outcome = {}) {
     ? {
         ...outcome.shipment_result,
         order_snapshot: buildOrderSnapshot(order),
-        routing_snapshot: buildRoutingSnapshot(outcome)
+        routing_snapshot: buildRoutingSnapshot(outcome),
+        merchant_snapshot: {
+          merchant_id: normalizedMerchant.merchant_id,
+          shop_domain: normalizedMerchant.shop_domain
+        }
       }
     : null;
 
@@ -258,34 +289,36 @@ async function saveShipmentOutcome(order, outcome = {}) {
     `
       UPDATE shipments
       SET
-        order_name = $2,
-        order_number = $3,
-        email = $4,
-        customer_name = $5,
-        shipping_city = $6,
-        shipping_zip = $7,
-        shipping_country = $8,
-        status = $9,
-        shipone_choice = $10,
-        selected_option = $11,
-        selected_carrier = $12,
-        selected_service = $13,
-        actual_carrier = $14,
-        fallback_used = $15,
-        fallback_from = $16,
-        tracking_number = $17,
-        tracking_url = $18,
-        shipment_success = $19,
-        fulfillment_success = $20,
-        shipment_result = $21,
-        fulfillment_result = $22,
-        error = $23,
+        merchant_id = $2,
+        shop_domain = $3,
+        order_name = $4,
+        order_number = $5,
+        email = $6,
+        customer_name = $7,
+        shipping_city = $8,
+        shipping_zip = $9,
+        shipping_country = $10,
+        status = $11,
+        shipone_choice = $12,
+        selected_option = $13,
+        selected_carrier = $14,
+        selected_service = $15,
+        actual_carrier = $16,
+        fallback_used = $17,
+        fallback_from = $18,
+        tracking_number = $19,
+        tracking_url = $20,
+        shipment_success = $21,
+        fulfillment_success = $22,
+        shipment_result = $23,
+        fulfillment_result = $24,
+        error = $25,
         completed_at = CASE
-          WHEN $24::timestamptz IS NOT NULL THEN $24::timestamptz
+          WHEN $26::timestamptz IS NOT NULL THEN $26::timestamptz
           ELSE completed_at
         END,
         failed_at = CASE
-          WHEN $25::timestamptz IS NOT NULL THEN $25::timestamptz
+          WHEN $27::timestamptz IS NOT NULL THEN $27::timestamptz
           ELSE failed_at
         END,
         updated_at = NOW()
@@ -294,6 +327,8 @@ async function saveShipmentOutcome(order, outcome = {}) {
     `,
     [
       order.id,
+      normalizedMerchant.merchant_id,
+      normalizedMerchant.shop_domain,
       order.name || null,
       orderNumber,
       order.email || null,
@@ -349,6 +384,10 @@ async function createDHLTestShipment(testData = {}) {
   const selectedService =
     normalizeTestValue(testData.selected_service) || "DHL Parcel Test";
   const shiponeChoice = normalizeTestValue(testData.shipone_choice) || "DHL_TEST";
+  const normalizedMerchant = normalizeMerchantContext({
+    merchant_id: testData.merchant_id,
+    shop_domain: testData.shop_domain
+  });
 
   const selectedOption = {
     id: "DHL_TEST",
@@ -366,6 +405,10 @@ async function createDHLTestShipment(testData = {}) {
     data: {
       trackingNumber,
       trackingUrl: null
+    },
+    merchant_snapshot: {
+      merchant_id: normalizedMerchant.merchant_id,
+      shop_domain: normalizedMerchant.shop_domain
     }
   };
 
@@ -379,6 +422,8 @@ async function createDHLTestShipment(testData = {}) {
     `
       INSERT INTO shipments (
         order_id,
+        merchant_id,
+        shop_domain,
         order_name,
         order_number,
         email,
@@ -415,22 +460,22 @@ async function createDHLTestShipment(testData = {}) {
         failed_at
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8,
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
         'completed',
         0,
-        $9,
-        $10,
-        'dhl',
         $11,
+        $12,
+        'dhl',
+        $13,
         'dhl',
         false,
         NULL,
-        $12,
+        $14,
         NULL,
         true,
         true,
-        $13,
-        $14,
+        $15,
+        $16,
         NULL,
         NULL,
         NULL,
@@ -446,6 +491,8 @@ async function createDHLTestShipment(testData = {}) {
       )
       ON CONFLICT (order_id)
       DO UPDATE SET
+        merchant_id = EXCLUDED.merchant_id,
+        shop_domain = EXCLUDED.shop_domain,
         order_name = EXCLUDED.order_name,
         order_number = EXCLUDED.order_number,
         email = EXCLUDED.email,
@@ -483,6 +530,8 @@ async function createDHLTestShipment(testData = {}) {
     `,
     [
       orderId,
+      normalizedMerchant.merchant_id,
+      normalizedMerchant.shop_domain,
       orderName,
       safeOrderNumber,
       email,
@@ -521,6 +570,8 @@ async function readShipments() {
       SELECT
         id,
         order_id,
+        merchant_id,
+        shop_domain,
         order_name,
         order_number,
         email,
@@ -569,6 +620,8 @@ async function findShipmentByOrderId(orderId) {
       SELECT
         id,
         order_id,
+        merchant_id,
+        shop_domain,
         order_name,
         order_number,
         email,
@@ -621,6 +674,8 @@ async function getRecentShipments(limit = 20) {
       SELECT
         id,
         order_id,
+        merchant_id,
+        shop_domain,
         order_name,
         order_number,
         email,

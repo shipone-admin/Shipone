@@ -83,6 +83,16 @@ function formatShipOneChoice(choice) {
   return choice || "-";
 }
 
+function formatMerchantLabel(merchantId) {
+  const value = String(merchantId || "").trim();
+  return value || "default";
+}
+
+function formatShopDomain(shopDomain) {
+  const value = String(shopDomain || "").trim();
+  return value || "-";
+}
+
 function getStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
 
@@ -139,13 +149,29 @@ function buildStats(shipments) {
   ).length;
   const problems = list.filter((shipment) => shipment.health === "problem").length;
   const waitingForNextSync = list.filter((shipment) => hasUpcomingSync(shipment)).length;
+  const merchants = new Set(
+    list.map((shipment) => formatMerchantLabel(shipment.merchant_id))
+  );
 
   return {
     total,
     completed,
     problems,
-    waitingForNextSync
+    waitingForNextSync,
+    merchantCount: merchants.size
   };
+}
+
+function buildMerchantOptions(shipments) {
+  const values = Array.from(
+    new Set(
+      (Array.isArray(shipments) ? shipments : [])
+        .map((shipment) => formatMerchantLabel(shipment.merchant_id))
+        .filter(Boolean)
+    )
+  );
+
+  return values.sort((a, b) => a.localeCompare(b, "sv"));
 }
 
 function renderHealthPill(shipment) {
@@ -159,6 +185,20 @@ function renderHealthPill(shipment) {
         ${label}
       </span>
       <div class="health-reason">${reason}</div>
+    </div>
+  `;
+}
+
+function renderMerchantCell(shipment) {
+  const merchantLabel = escapeHtml(formatMerchantLabel(shipment.merchant_id));
+  const shopDomain = escapeHtml(formatShopDomain(shipment.shop_domain));
+
+  return `
+    <div class="merchant-block">
+      <div class="primary">
+        <span class="merchant-pill">${merchantLabel}</span>
+      </div>
+      <div class="secondary">Shop: ${shopDomain}</div>
     </div>
   `;
 }
@@ -274,7 +314,7 @@ function renderRows(shipments) {
   if (!Array.isArray(shipments) || shipments.length === 0) {
     return `
       <tr>
-        <td colspan="13" class="empty-cell">
+        <td colspan="14" class="empty-cell">
           Inga shipments hittades för aktuellt filter.
         </td>
       </tr>
@@ -316,6 +356,10 @@ function renderRows(shipments) {
               </div>
               <div class="secondary">Order ID: ${orderId}</div>
             </div>
+          </td>
+
+          <td>
+            ${renderMerchantCell(shipment)}
           </td>
 
           <td>
@@ -400,7 +444,9 @@ function renderAdminDashboard({
   const q = escapeHtml(filters.q || "");
   const status = String(filters.status || "");
   const carrier = String(filters.carrier || "");
+  const merchant = String(filters.merchant || "");
   const stats = buildStats(visibleShipments);
+  const merchantOptions = buildMerchantOptions(enrichedShipments);
 
   return `
     <!DOCTYPE html>
@@ -458,7 +504,7 @@ function renderAdminDashboard({
         }
 
         .wrap {
-          max-width: 1600px;
+          max-width: 1720px;
           margin: 0 auto;
         }
 
@@ -547,7 +593,7 @@ function renderAdminDashboard({
 
         .stats {
           display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
+          grid-template-columns: repeat(5, minmax(0, 1fr));
           gap: 16px;
           margin-top: 24px;
         }
@@ -573,6 +619,11 @@ function renderAdminDashboard({
         .stat-card.waiting {
           border-color: #d7e6ff;
           background: linear-gradient(180deg, #fbfdff 0%, #f4f9ff 100%);
+        }
+
+        .stat-card.merchant {
+          border-color: #dbeafe;
+          background: linear-gradient(180deg, #fbfdff 0%, #f4f8ff 100%);
         }
 
         .stat-label {
@@ -609,7 +660,7 @@ function renderAdminDashboard({
 
         .filters-form {
           display: grid;
-          grid-template-columns: 2fr 1fr 1fr 1fr auto auto;
+          grid-template-columns: 2fr 1fr 1fr 1fr 1.3fr auto auto;
           gap: 12px;
           align-items: end;
         }
@@ -738,7 +789,7 @@ function renderAdminDashboard({
           width: 100%;
           border-collapse: separate;
           border-spacing: 0;
-          min-width: 1780px;
+          min-width: 1940px;
         }
 
         thead th {
@@ -787,7 +838,8 @@ function renderAdminDashboard({
         .order-block,
         .tracking-block,
         .carrier-block,
-        .strategy-block {
+        .strategy-block,
+        .merchant-block {
           min-width: 0;
         }
 
@@ -900,6 +952,20 @@ function renderAdminDashboard({
         .badge-neutral {
           background: var(--neutral-bg);
           color: var(--neutral-text);
+        }
+
+        .merchant-pill {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          padding: 8px 12px;
+          font-size: 12px;
+          font-weight: 800;
+          background: #eef4ff;
+          color: #1d4ed8;
+          border: 1px solid #dbeafe;
+          max-width: 100%;
+          word-break: break-word;
         }
 
         .carrier-pill {
@@ -1040,13 +1106,13 @@ function renderAdminDashboard({
           background: #fff;
         }
 
-        @media (max-width: 1280px) {
+        @media (max-width: 1380px) {
           .stats {
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
           }
 
           .filters-form {
-            grid-template-columns: 1fr;
+            grid-template-columns: 1fr 1fr;
           }
 
           h1 {
@@ -1066,6 +1132,10 @@ function renderAdminDashboard({
           }
 
           .stats {
+            grid-template-columns: 1fr;
+          }
+
+          .filters-form {
             grid-template-columns: 1fr;
           }
 
@@ -1106,6 +1176,11 @@ function renderAdminDashboard({
               <div class="stat-value">${stats.total}</div>
             </div>
 
+            <div class="stat-card merchant">
+              <div class="stat-label">Merchants</div>
+              <div class="stat-value">${stats.merchantCount}</div>
+            </div>
+
             <div class="stat-card success">
               <div class="stat-label">Slutförda</div>
               <div class="stat-value">${stats.completed}</div>
@@ -1135,7 +1210,7 @@ function renderAdminDashboard({
                 name="q"
                 type="text"
                 value="${q}"
-                placeholder="Order, order-id eller trackingnummer"
+                placeholder="Order, order-id, trackingnummer, merchant eller shop"
               />
             </div>
 
@@ -1170,18 +1245,35 @@ function renderAdminDashboard({
               </select>
             </div>
 
+            <div class="field">
+              <label for="merchant">Merchant</label>
+              <select class="select" id="merchant" name="merchant">
+                <option value="" ${merchant === "" ? "selected" : ""}>Alla</option>
+                ${merchantOptions
+                  .map(
+                    (option) => `
+                      <option value="${escapeHtml(option)}" ${merchant === option ? "selected" : ""}>
+                        ${escapeHtml(option)}
+                      </option>
+                    `
+                  )
+                  .join("")}
+              </select>
+            </div>
+
             <button class="filter-button" type="submit">Filtrera</button>
             <a class="reset-button" href="/admin">Rensa</a>
           </form>
 
           ${
-            filters.q || filters.status || filters.carrier || health
+            filters.q || filters.status || filters.carrier || health || filters.merchant
               ? `
                 <div class="active-filters">
                   ${filters.q ? `<div class="filter-pill">Sök: ${escapeHtml(filters.q)}</div>` : ""}
                   ${filters.status ? `<div class="filter-pill">Status: ${escapeHtml(formatShipmentStatus(filters.status))}</div>` : ""}
                   ${filters.carrier ? `<div class="filter-pill">Carrier: ${escapeHtml(formatCarrierName(filters.carrier))}</div>` : ""}
                   ${health ? `<div class="filter-pill">Health: ${escapeHtml(formatHealthLabel(health))}</div>` : ""}
+                  ${filters.merchant ? `<div class="filter-pill">Merchant: ${escapeHtml(formatMerchantLabel(filters.merchant))}</div>` : ""}
                 </div>
               `
               : ""
@@ -1201,6 +1293,7 @@ function renderAdminDashboard({
               <thead>
                 <tr>
                   <th>Order</th>
+                  <th>Merchant</th>
                   <th>Health</th>
                   <th>Strategi</th>
                   <th>Carrier</th>

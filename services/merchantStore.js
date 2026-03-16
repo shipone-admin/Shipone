@@ -174,6 +174,58 @@ async function upsertShopifyStore({ shop_domain, merchant_id, is_active = true }
   return result.rows[0] || null;
 }
 
+async function listMerchants() {
+  const result = await query(
+    `
+      SELECT
+        m.id,
+        m.name,
+        m.status,
+        m.created_at,
+        m.updated_at,
+        COUNT(s.id)::int AS store_count
+      FROM merchants m
+      LEFT JOIN shopify_stores s
+        ON s.merchant_id = m.id
+      GROUP BY
+        m.id,
+        m.name,
+        m.status,
+        m.created_at,
+        m.updated_at
+      ORDER BY
+        m.created_at DESC,
+        m.id ASC
+    `
+  );
+
+  return result.rows;
+}
+
+async function listShopifyStores() {
+  const result = await query(
+    `
+      SELECT
+        s.id,
+        s.shop_domain,
+        s.merchant_id,
+        s.is_active,
+        s.created_at,
+        s.updated_at,
+        m.name AS merchant_name,
+        m.status AS merchant_status
+      FROM shopify_stores s
+      INNER JOIN merchants m
+        ON m.id = s.merchant_id
+      ORDER BY
+        s.created_at DESC,
+        s.id DESC
+    `
+  );
+
+  return result.rows;
+}
+
 module.exports = {
   normalizeMerchantId,
   normalizeShopDomain,
@@ -181,5 +233,7 @@ module.exports = {
   findMerchantByShopDomain,
   resolveMerchantContext,
   upsertMerchant,
-  upsertShopifyStore
+  upsertShopifyStore,
+  listMerchants,
+  listShopifyStores
 };

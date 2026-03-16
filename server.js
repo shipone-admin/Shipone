@@ -49,6 +49,11 @@ const {
 } = require("./services/merchantStore");
 
 const {
+  getMerchantCarrierMatrix,
+  upsertMerchantCarrierSetting
+} = require("./services/merchantCarrierSettings");
+
+const {
   renderTrackingPage,
   renderTrackingNotFoundPage,
   renderTrackingErrorPage
@@ -58,6 +63,9 @@ const { renderHomePage } = require("./views/homePage");
 const { renderAdminDashboard } = require("./views/adminDashboard");
 const { renderAdminShipmentDetails } = require("./views/adminShipmentDetails");
 const { renderAdminMerchantsPage } = require("./views/adminMerchants");
+const {
+  renderAdminMerchantCarrierSettingsPage
+} = require("./views/adminMerchantCarrierSettings");
 
 const app = express();
 app.use(express.json());
@@ -642,6 +650,63 @@ app.post("/admin/merchants/store/upsert", requireCronSecret, async (req, res) =>
 
     return res.redirect(
       `/admin/merchants?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent(error.message)}&type=error`
+    );
+  }
+});
+
+app.get("/admin/merchant-carriers", requireCronSecret, async (req, res) => {
+  try {
+    const rows = await getMerchantCarrierMatrix();
+
+    return res.status(200).send(
+      renderAdminMerchantCarrierSettingsPage({
+        rows,
+        token: req.query.token || "",
+        flashMessage: req.query.message || "",
+        flashType: req.query.type || "success"
+      })
+    );
+  } catch (error) {
+    console.error("Merchant carrier settings page failed:", error.message);
+
+    return res.status(500).send(`
+      <html lang="sv">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>ShipOne Merchant Carrier Settings</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; padding: 40px;">
+          <h1>ShipOne Merchant Carrier Settings</h1>
+          <p>Det gick inte att läsa carrier settings just nu.</p>
+          <p><a href="/admin/merchants?token=${encodeURIComponent(req.query.token || "")}">Tillbaka till merchant admin</a></p>
+        </body>
+      </html>
+    `);
+  }
+});
+
+app.post("/admin/merchant-carriers/upsert", requireCronSecret, async (req, res) => {
+  try {
+    await upsertMerchantCarrierSetting({
+      merchant_id: req.body.merchant_id,
+      carrier_key: req.body.carrier_key,
+      shipments_enabled:
+        String(req.body.shipments_enabled || "true").toLowerCase() === "true",
+      rates_enabled:
+        String(req.body.rates_enabled || "true").toLowerCase() === "true",
+      tracking_enabled:
+        String(req.body.tracking_enabled || "true").toLowerCase() === "true"
+    });
+
+    return res.redirect(
+      `/admin/merchant-carriers?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent("Carrier-inställning sparad")}&type=success`
+    );
+  } catch (error) {
+    console.error("Merchant carrier setting upsert failed:", error.message);
+
+    return res.redirect(
+      `/admin/merchant-carriers?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent(error.message)}&type=error`
     );
   }
 });

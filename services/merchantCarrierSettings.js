@@ -1,0 +1,201 @@
+const { query } = require("./db");
+
+const SUPPORTED_CARRIERS = ["postnord", "dhl", "budbee"];
+
+function normalizeMerchantId(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text || "default";
+}
+
+function normalizeCarrierKey(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text || null;
+}
+
+function isSupportedCarrier(carrierKey) {
+  return SUPPORTED_CARRIERS.includes(normalizeCarrierKey(carrierKey));
+}
+
+async function ensureMerchantCarrierDefaults(merchantId) {
+  const safeMerchantId = normalizeMerchantId(merchantId);
+
+  for (const carrierKey of SUPPORTED_CARRIERS) {
+    await query(
+      `
+        INSERT INTO merchant_carrier_settings (
+          merchant_id,
+          carrier_key,
+          shipments_enabled,
+          rates_enabled,
+          tracking_enabled,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1,
+          $2,
+          true,
+          true,
+          true,
+          NOW(),
+          NOW()
+        )
+        ON CONFLICT (merchant_id, carrier_key) DO NOTHING
+      `,
+      [safeMerchantId, carrierKey]
+    );
+  }
+}
+
+async function listMerchantCarrierSettings() {
+  const result = await query(
+    `
+      SELECT
+        s.id,
+        s.merchant_id,
+        s.carrier_key,
+        s.shipments_enabled,
+        s.rates_enabled,
+        s.tracking_enabled,
+        s.created_at,
+        s.updated_at,
+        m.name AS merchant_name,
+        m.status AS merchant_status
+      FROM merchant_carrier_settings s
+      INNER JOIN merchants m
+        ON m.id = s.merchant_id
+      ORDER BY
+        s.merchant_id ASC,
+        s.carrier_key ASC
+    `
+  );
+
+  return result.rows;
+}
+
+async function listMerchantCarrierSettingsByMerchantId(merchantId) {
+  const safeMerchantId = normalizeMerchantId(merchantId);
+
+  await ensureMerchantCarrierDefaults(safeMerchantId);
+
+  const result = await query(
+    `
+      SELECT
+        s.id,
+        s.merchant_id,
+        s.carrier_key,
+        s.shipments_enabled,
+        s.rates_enabled,
+        s.tracking_enabled,
+        s.created_at,
+        s.updated_at
+      FROM merchant_carrier_settings s
+      WHERE s.merchant_id = $1
+      ORDER BY s.carrier_key ASC
+    `,
+    [safeMerchantId]
+  );
+
+  return result.rows;
+}
+
+async function getMerchantCarrierMatrix() {
+  const result = await query(
+    `
+      SELECT
+        m.id AS merchant_id,
+        m.name AS merchant_name,
+        m.status AS merchant_status,
+        c.carrier_key,
+        COALESCE(s.shipments_enabled, true) AS shipments_enabled,
+        COALESCE(s.rates_enabled, true) AS rates_enabled,
+        COALESCE(s.tracking_enabled, true) AS tracking_enabled
+      FROM merchants m
+      CROSS JOIN (
+        SELECT UNNEST(ARRAY['postnord', 'dhl', 'budbee']) AS carrier_key
+      ) c
+      LEFT JOIN merchant_carrier_settings s
+        ON s.merchant_id = m.id
+       AND s.carrier_key = c.carrier_key
+      ORDER BY
+        m.id ASC,
+        c.carrier_key ASC
+    `
+  );
+
+  return result.rows;
+}
+
+async function upsertMerchantCarrierSetting({
+  merchant_id,
+  carrier_key,
+  shipments_enabled = true,
+  rates_enabled = true,
+  tracking_enabled = true
+}) {
+  const safeMerchantId = normalizeMerchantId(merchant_id);
+  const safeCarrierKey = normalizeCarrierKey(carrier_key);
+
+  if (!safeMerchantId) {
+    throw new Error("Missing merchant id");
+  }
+
+  if (!safeCarrierKey) {
+    throw new Error("Missing carrier key");
+  }
+
+  if (!isSupportedCarrier(safeCarrierKey)) {
+    throw new Error(`Unsupported carrier key: ${safeCarrierKey}`);
+  }
+
+  const result = await query(
+    `
+      INSERT INTO merchant_carrier_settings (
+        merchant_id,
+        carrier_key,
+        shipments_enabled,
+        rates_enabled,
+        tracking_enabled,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        NOW(),
+        NOW()
+      )
+      ON CONFLICT (merchant_id, carrier_key)
+      DO UPDATE SET
+        shipments_enabled = EXCLUDED.shipments_enabled,
+        rates_enabled = EXCLUDED.rates_enabled,
+        tracking_enabled = EXCLUDED.tracking_enabled,
+        updated_at = NOW()
+      RETURNING *
+    `,
+    [
+      safeMerchantId,
+      safeCarrierKey,
+      Boolean(shipments_enabled),
+      Boolean(rates_enabled),
+      Boolean(tracking_enabled)
+    ]
+  );
+
+  return result.rows[0] || null;
+}
+
+module.exports = {
+  SUPPORTED_CARRIERS,
+  normalizeMerchantId,
+  normalizeCarrierKey,
+  isSupportedCarrier,
+  ensureMerchantCarrierDefaults,
+  listMerchantCarrierSettings,
+  listMerchantCarrierSettingsByMerchantId,
+  getMerchantCarrierMatrix,
+  upsertMerchantCarrierSetting
+};

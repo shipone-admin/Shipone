@@ -1,6 +1,6 @@
 // ================================
 // SHIPONE UNIVERSAL SHIPMENT HANDLER
-// CARRIER-CONFIG VERSION
+// CARRIER-CONFIG + MERCHANT SETTINGS VERSION
 // ================================
 
 const { createPostNordShipment } = require("../postnordShipment");
@@ -10,6 +10,11 @@ const {
   canUseCarrierForShipment,
   getEnabledShipmentCarriers
 } = require("./carrierConfig");
+
+const {
+  normalizeMerchantId,
+  getEnabledShipmentCarriersForMerchant
+} = require("./merchantCarrierSettings");
 
 async function tryPostNord(order) {
   console.log("📡 Trying PostNord...");
@@ -65,15 +70,22 @@ async function runCarrierAttempt(carrier, order) {
   throw new Error(`Unsupported carrier: ${carrier}`);
 }
 
-function buildFallbackChain(preferredCarrier) {
-  const enabledShipmentCarriers = getEnabledShipmentCarriers();
+async function buildMerchantAllowedCarrierChain(merchantId) {
+  const globallyEnabledCarriers = getEnabledShipmentCarriers();
+  const merchantEnabledCarriers = await getEnabledShipmentCarriersForMerchant(
+    merchantId
+  );
 
-  return enabledShipmentCarriers.filter(
-    (carrier) => carrier !== preferredCarrier
+  return globallyEnabledCarriers.filter((carrier) =>
+    merchantEnabledCarriers.includes(carrier)
   );
 }
 
-async function createShipment(order, selectedOption) {
+function buildFallbackChain(preferredCarrier, allowedCarriers) {
+  return allowedCarriers.filter((carrier) => carrier !== preferredCarrier);
+}
+
+async function createShipment(order, selectedOption, merchantContext = {}) {
   console.log("🚚 ShipOne creating shipment...");
 
   if (!selectedOption || !selectedOption.carrier) {
@@ -88,29 +100,47 @@ async function createShipment(order, selectedOption) {
     };
   }
 
+  const merchantId = normalizeMerchantId(merchantContext.merchant_id);
   const preferredCarrier = String(selectedOption.carrier).toLowerCase();
   const selectedService = selectedOption.name || null;
 
+  console.log("🏪 Shipment merchant:", merchantId);
   console.log("🎯 Preferred carrier:", preferredCarrier);
   console.log("🎯 Preferred service:", selectedService || "Unknown");
 
-  const fallbackChain = buildFallbackChain(preferredCarrier);
+  const allowedCarriers = await buildMerchantAllowedCarrierChain(merchantId);
+
+  console.log(
+    "🧩 Merchant-allowed shipment carriers:",
+    allowedCarriers.join(" -> ") || "none"
+  );
+
+  if (!allowedCarriers.includes(preferredCarrier)) {
+    console.log(
+      `⛔ Preferred carrier blocked by merchant settings: ${preferredCarrier}`
+    );
+  }
+
+  const fallbackChain = buildFallbackChain(preferredCarrier, allowedCarriers);
 
   console.log("🛟 Fallback chain:", fallbackChain.join(" -> ") || "none");
 
-  try {
-    const preferredResult = await runCarrierAttempt(preferredCarrier, order);
+  if (allowedCarriers.includes(preferredCarrier)) {
+    try {
+      const preferredResult = await runCarrierAttempt(preferredCarrier, order);
 
-    return {
-      ...preferredResult,
-      selected_carrier: preferredCarrier,
-      selected_service: selectedService,
-      fallbackUsed: false,
-      fallbackFrom: null
-    };
-  } catch (error) {
-    console.log(`❌ ${preferredCarrier.toUpperCase()} failed — activating fallback`);
-    console.log("Reason:", error.message);
+      return {
+        ...preferredResult,
+        selected_carrier: preferredCarrier,
+        selected_service: selectedService,
+        fallbackUsed: false,
+        fallbackFrom: null,
+        merchant_id: merchantId
+      };
+    } catch (error) {
+      console.log(`❌ ${preferredCarrier.toUpperCase()} failed — activating fallback`);
+      console.log("Reason:", error.message);
+    }
   }
 
   for (const fallbackCarrier of fallbackChain) {
@@ -124,12 +154,39 @@ async function createShipment(order, selectedOption) {
         selected_carrier: preferredCarrier,
         selected_service: selectedService,
         fallbackUsed: true,
-        fallbackFrom: preferredCarrier
+        fallbackFrom: preferredCarrier,
+        merchant_id: merchantId
       };
     } catch (fallbackError) {
       console.log(`❌ ${fallbackCarrier.toUpperCase()} also failed`);
       console.log("Reason:", fallbackError.message);
     }
+  }
+
+  if (allowedCarriers.length === 0) {
+    return {
+      success: false,
+      carrier: null,
+      selected_carrier: preferredCarrier,
+      selected_service: selectedService,
+      fallbackUsed: false,
+      fallbackFrom: null,
+      merchant_id: merchantId,
+      error: `No shipment carriers enabled for merchant: ${merchantId}`
+    };
+  }
+
+  if (!allowedCarriers.includes(preferredCarrier) && fallbackChain.length === 0) {
+    return {
+      success: false,
+      carrier: null,
+      selected_carrier: preferredCarrier,
+      selected_service: selectedService,
+      fallbackUsed: false,
+      fallbackFrom: null,
+      merchant_id: merchantId,
+      error: `Preferred carrier disabled for merchant and no fallback carriers available: ${preferredCarrier}`
+    };
   }
 
   return {
@@ -139,6 +196,7 @@ async function createShipment(order, selectedOption) {
     selected_service: selectedService,
     fallbackUsed: false,
     fallbackFrom: null,
+    merchant_id: merchantId,
     error: "All enabled carriers failed"
   };
 }

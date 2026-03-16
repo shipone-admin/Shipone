@@ -50,7 +50,8 @@ const {
 
 const {
   getMerchantCarrierMatrix,
-  upsertMerchantCarrierSetting
+  upsertMerchantCarrierSetting,
+  getEnabledRateCarriersForMerchant
 } = require("./services/merchantCarrierSettings");
 
 const {
@@ -295,20 +296,47 @@ function buildPreviewOption(strategyKey, selectedOption, allRates) {
   };
 }
 
-async function buildShipOneRatePreview() {
+async function filterRatesForMerchant(rates, merchantContext = {}) {
+  const merchantId = normalizeMerchantId(merchantContext.merchant_id);
+  const enabledRateCarriers = await getEnabledRateCarriersForMerchant(merchantId);
+
+  const list = Array.isArray(rates) ? rates : [];
+
+  const filteredRates = list.filter((rate) => {
+    const carrierKey = String(rate?.carrier || "").trim().toLowerCase();
+    return enabledRateCarriers.includes(carrierKey);
+  });
+
+  console.log("🏪 Rate filtering merchant:", merchantId);
+  console.log(
+    "🧩 Merchant-allowed rate carriers:",
+    enabledRateCarriers.join(" -> ") || "none"
+  );
+  console.log("📦 Rates before merchant filter:", list.length);
+  console.log("📦 Rates after merchant filter:", filteredRates.length);
+
+  return filteredRates;
+}
+
+async function buildShipOneRatePreview(merchantContext = {}) {
   const previewOrder = buildPreviewOrder();
   const shippingOptions = await collectRates(previewOrder);
+  const filteredOptions = await filterRatesForMerchant(
+    shippingOptions,
+    merchantContext
+  );
 
-  const fastOption = chooseBestOption(shippingOptions, "FAST");
-  const cheapOption = chooseBestOption(shippingOptions, "CHEAP");
-  const greenOption = chooseBestOption(shippingOptions, "GREEN");
+  const fastOption = chooseBestOption(filteredOptions, "FAST");
+  const cheapOption = chooseBestOption(filteredOptions, "CHEAP");
+  const greenOption = chooseBestOption(filteredOptions, "GREEN");
 
   return {
     success: true,
     generatedAt: new Date().toISOString(),
     currency: "SEK",
-    activeRateCount: shippingOptions.length,
-    activeRates: shippingOptions.map((option) => ({
+    merchant_id: normalizeMerchantId(merchantContext.merchant_id),
+    activeRateCount: filteredOptions.length,
+    activeRates: filteredOptions.map((option) => ({
       carrier: option.carrier || null,
       carrierLabel: formatCarrierLabel(option.carrier),
       service: option.name || "-",
@@ -320,9 +348,9 @@ async function buildShipOneRatePreview() {
       raw: option
     })),
     strategies: {
-      FASTEST: buildPreviewOption("FAST", fastOption, shippingOptions),
-      CHEAPEST: buildPreviewOption("CHEAP", cheapOption, shippingOptions),
-      GREEN: buildPreviewOption("GREEN", greenOption, shippingOptions)
+      FASTEST: buildPreviewOption("FAST", fastOption, filteredOptions),
+      CHEAPEST: buildPreviewOption("CHEAP", cheapOption, filteredOptions),
+      GREEN: buildPreviewOption("GREEN", greenOption, filteredOptions)
     }
   };
 }
@@ -517,7 +545,8 @@ app.get("/api/rates/preview", async (req, res) => {
   try {
     setPublicApiCors(res);
 
-    const preview = await buildShipOneRatePreview();
+    const merchantContext = await resolveMerchantContextFromRequest(req);
+    const preview = await buildShipOneRatePreview(merchantContext);
 
     return res.status(200).json(preview);
   } catch (error) {
@@ -1175,13 +1204,18 @@ app.post("/webhooks/orders-create", async (req, res) => {
     }
 
     const shippingOptions = await collectRates(order);
+    const filteredShippingOptions = await filterRatesForMerchant(
+      shippingOptions,
+      merchantContext
+    );
+
     const shipOneChoice = extractShipOneDeliveryChoice(order);
 
     console.log("🚚 ShipOne order delivery choice raw:", shipOneChoice.raw || "none");
     console.log("🚚 ShipOne order delivery choice normalized:", shipOneChoice.normalized);
 
     const selectedOption = chooseBestOption(
-      shippingOptions,
+      filteredShippingOptions,
       shipOneChoice.normalized
     );
 
@@ -1190,7 +1224,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
         order.id,
         {
           order_name: order.name,
-          error: "No shipping option selected"
+          error: "No shipping option selected after merchant rate filtering"
         },
         merchantContext
       );

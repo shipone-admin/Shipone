@@ -590,25 +590,6 @@ app.get("/admin/merchants", requireCronSecret, async (req, res) => {
     `);
   }
 });
-  } catch (error) {
-    console.error("Merchant admin page failed:", error.message);
-
-    return res.status(500).send(`
-      <html lang="sv">
-        <head>
-          <meta charset="UTF-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>ShipOne Merchant Admin</title>
-        </head>
-        <body style="font-family: Arial, sans-serif; padding: 40px;">
-          <h1>ShipOne Merchant Admin</h1>
-          <p>Det gick inte att läsa merchant admin just nu.</p>
-          <p><a href="/admin?token=${encodeURIComponent(req.query.token || "")}">Tillbaka till admin</a></p>
-        </body>
-      </html>
-    `);
-  }
-});
 
 app.post("/admin/merchants/upsert", requireCronSecret, async (req, res) => {
   try {

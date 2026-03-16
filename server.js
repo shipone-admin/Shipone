@@ -39,6 +39,14 @@ const {
 } = require("./services/shipmentStore");
 
 const {
+  resolveMerchantContext,
+  upsertMerchant,
+  upsertShopifyStore,
+  normalizeShopDomain,
+  normalizeMerchantId
+} = require("./services/merchantStore");
+
+const {
   renderTrackingPage,
   renderTrackingNotFoundPage,
   renderTrackingErrorPage
@@ -329,30 +337,7 @@ async function getLiveCarrierTrackingForShipment(shipment) {
   };
 }
 
-function normalizeMerchantId(value) {
-  const text = String(value || "").trim().toLowerCase();
-  return text || "default";
-}
-
-function normalizeShopDomain(value) {
-  const text = String(value || "").trim().toLowerCase();
-  return text || null;
-}
-
-function buildMerchantIdFromShopDomain(shopDomain) {
-  const normalized = normalizeShopDomain(shopDomain);
-
-  if (!normalized) {
-    return null;
-  }
-
-  return normalized
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "")
-    .replace(/[^a-z0-9.-]/g, "-");
-}
-
-function resolveMerchantContextFromRequest(req) {
+async function resolveMerchantContextFromRequest(req) {
   const shopDomain =
     normalizeShopDomain(req.headers["x-shopify-shop-domain"]) ||
     normalizeShopDomain(req.body?.shop_domain) ||
@@ -367,15 +352,11 @@ function resolveMerchantContextFromRequest(req) {
     process.env.SHIPONE_DEFAULT_MERCHANT_ID || "default"
   );
 
-  const merchantId =
-    explicitMerchantId !== "default"
-      ? explicitMerchantId
-      : buildMerchantIdFromShopDomain(shopDomain) || defaultMerchantId;
-
-  return {
-    merchant_id: merchantId,
-    shop_domain: shopDomain
-  };
+  return resolveMerchantContext({
+    explicitMerchantId,
+    shopDomain,
+    defaultMerchantId
+  });
 }
 
 function renderDHLTestPage({
@@ -898,6 +879,67 @@ app.get("/admin/db/migrate-rate-limit", requireCronSecret, async (req, res) => {
   }
 });
 
+app.get("/admin/merchant/upsert", requireCronSecret, async (req, res) => {
+  try {
+    const merchant = await upsertMerchant({
+      id: req.query.id,
+      name: req.query.name,
+      status: req.query.status || "active"
+    });
+
+    return res.status(200).json({
+      success: true,
+      merchant
+    });
+  } catch (error) {
+    console.error("Merchant upsert failed:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get("/admin/shopify-store/upsert", requireCronSecret, async (req, res) => {
+  try {
+    const merchantId = normalizeMerchantId(req.query.merchant_id);
+    const shopDomain = normalizeShopDomain(req.query.shop_domain);
+
+    if (!merchantId || !shopDomain) {
+      return res.status(400).json({
+        success: false,
+        error: "merchant_id and shop_domain are required"
+      });
+    }
+
+    await upsertMerchant({
+      id: merchantId,
+      name: req.query.merchant_name || merchantId,
+      status: req.query.merchant_status || "active"
+    });
+
+    const store = await upsertShopifyStore({
+      shop_domain: shopDomain,
+      merchant_id: merchantId,
+      is_active:
+        String(req.query.is_active || "true").toLowerCase() !== "false"
+    });
+
+    return res.status(200).json({
+      success: true,
+      store
+    });
+  } catch (error) {
+    console.error("Shopify store upsert failed:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.get("/track/:trackingNumber", async (req, res) => {
   try {
     const result = await query(
@@ -944,7 +986,7 @@ app.get("/track/:trackingNumber", async (req, res) => {
 
 app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
-  const merchantContext = resolveMerchantContextFromRequest(req);
+  const merchantContext = await resolveMerchantContextFromRequest(req);
 
   try {
     if (!order || !order.id) {
@@ -953,6 +995,7 @@ app.post("/webhooks/orders-create", async (req, res) => {
 
     console.log("🏪 ShipOne merchant resolved:", merchantContext.merchant_id);
     console.log("🏪 Shopify shop domain:", merchantContext.shop_domain || "unknown");
+    console.log("🏪 Merchant source:", merchantContext.source || "unknown");
 
     const state = await beginOrderProcessing(order, merchantContext);
 

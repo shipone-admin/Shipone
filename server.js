@@ -1202,7 +1202,11 @@ app.post("/webhooks/orders-create", async (req, res) => {
     console.log("✅ ShipOne selected service:", selectedOption.name || "unknown");
     console.log("✅ ShipOne selected price:", selectedOption.price ?? "unknown");
 
-    const shipmentResult = await createShipment(order, selectedOption);
+    const shipmentResult = await createShipment(
+      order,
+      selectedOption,
+      merchantContext
+    );
 
     let fulfillmentResult = {
       success: false

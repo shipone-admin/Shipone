@@ -17,6 +17,8 @@ async function initDatabase() {
     CREATE TABLE IF NOT EXISTS shipments (
       id SERIAL PRIMARY KEY,
       order_id BIGINT UNIQUE NOT NULL,
+      merchant_id TEXT NOT NULL DEFAULT 'default',
+      shop_domain TEXT,
       order_name TEXT,
       order_number INTEGER,
       email TEXT,
@@ -44,11 +46,24 @@ async function initDatabase() {
       carrier_last_event_at TIMESTAMPTZ,
       carrier_event_count INTEGER DEFAULT 0,
       carrier_last_synced_at TIMESTAMPTZ,
+      carrier_next_sync_at TIMESTAMP,
+      carrier_sync_attempts INTEGER DEFAULT 0,
+      carrier_last_sync_status TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       completed_at TIMESTAMPTZ,
       failed_at TIMESTAMPTZ
     )
+  `);
+
+  await query(`
+    ALTER TABLE shipments
+    ADD COLUMN IF NOT EXISTS merchant_id TEXT NOT NULL DEFAULT 'default'
+  `);
+
+  await query(`
+    ALTER TABLE shipments
+    ADD COLUMN IF NOT EXISTS shop_domain TEXT
   `);
 
   await query(`
@@ -69,6 +84,31 @@ async function initDatabase() {
   await query(`
     ALTER TABLE shipments
     ADD COLUMN IF NOT EXISTS carrier_last_synced_at TIMESTAMPTZ
+  `);
+
+  await query(`
+    ALTER TABLE shipments
+    ADD COLUMN IF NOT EXISTS carrier_next_sync_at TIMESTAMP
+  `);
+
+  await query(`
+    ALTER TABLE shipments
+    ADD COLUMN IF NOT EXISTS carrier_sync_attempts INTEGER DEFAULT 0
+  `);
+
+  await query(`
+    ALTER TABLE shipments
+    ADD COLUMN IF NOT EXISTS carrier_last_sync_status TEXT
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_shipments_merchant_id
+    ON shipments (merchant_id)
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_shipments_shop_domain
+    ON shipments (shop_domain)
   `);
 
   console.log("✅ PostgreSQL shipments table ready");

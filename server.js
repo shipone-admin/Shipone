@@ -88,7 +88,8 @@ function normalizeAdminFilters(queryParams) {
     q: String(queryParams.q || "").trim(),
     status: String(queryParams.status || "").trim().toLowerCase(),
     carrier: String(queryParams.carrier || "").trim().toLowerCase(),
-    health: String(queryParams.health || "").trim().toLowerCase()
+    health: String(queryParams.health || "").trim().toLowerCase(),
+    merchant: String(queryParams.merchant || "").trim().toLowerCase()
   };
 }
 
@@ -96,7 +97,9 @@ function matchesAdminFilters(shipment, filters) {
   const searchHaystack = [
     shipment.order_name,
     shipment.order_id,
-    shipment.tracking_number
+    shipment.tracking_number,
+    shipment.merchant_id,
+    shipment.shop_domain
   ]
     .filter(Boolean)
     .join(" ")
@@ -116,6 +119,13 @@ function matchesAdminFilters(shipment, filters) {
   if (filters.carrier) {
     const shipmentCarrier = String(shipment.actual_carrier || "").toLowerCase();
     if (shipmentCarrier !== filters.carrier) {
+      return false;
+    }
+  }
+
+  if (filters.merchant) {
+    const shipmentMerchant = String(shipment.merchant_id || "").toLowerCase();
+    if (shipmentMerchant !== filters.merchant) {
       return false;
     }
   }
@@ -319,6 +329,55 @@ async function getLiveCarrierTrackingForShipment(shipment) {
   };
 }
 
+function normalizeMerchantId(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text || "default";
+}
+
+function normalizeShopDomain(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text || null;
+}
+
+function buildMerchantIdFromShopDomain(shopDomain) {
+  const normalized = normalizeShopDomain(shopDomain);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/[^a-z0-9.-]/g, "-");
+}
+
+function resolveMerchantContextFromRequest(req) {
+  const shopDomain =
+    normalizeShopDomain(req.headers["x-shopify-shop-domain"]) ||
+    normalizeShopDomain(req.body?.shop_domain) ||
+    normalizeShopDomain(req.query.shop_domain);
+
+  const explicitMerchantId =
+    normalizeMerchantId(req.headers["x-shipone-merchant-id"]) ||
+    normalizeMerchantId(req.body?.merchant_id) ||
+    normalizeMerchantId(req.query.merchant_id);
+
+  const defaultMerchantId = normalizeMerchantId(
+    process.env.SHIPONE_DEFAULT_MERCHANT_ID || "default"
+  );
+
+  const merchantId =
+    explicitMerchantId !== "default"
+      ? explicitMerchantId
+      : buildMerchantIdFromShopDomain(shopDomain) || defaultMerchantId;
+
+  return {
+    merchant_id: merchantId,
+    shop_domain: shopDomain
+  };
+}
+
 function renderDHLTestPage({
   token,
   createdShipment = null,
@@ -335,6 +394,8 @@ function renderDHLTestPage({
     ? `
       <div style="margin-bottom:16px;padding:16px;border-radius:14px;background:#ecfdf5;color:#065f46;border:1px solid #bbf7d0;">
         <strong>DHL test-shipment skapat.</strong><br />
+        Merchant: ${createdShipment.merchant_id || "default"}<br />
+        Shop domain: ${createdShipment.shop_domain || "-"}<br />
         Order ID: ${createdShipment.order_id}<br />
         Trackingnummer: ${createdShipment.tracking_number}<br />
         <a href="/admin/shipment/${encodeURIComponent(createdShipment.order_id)}" style="color:#065f46;font-weight:700;">Öppna shipment</a>
@@ -395,6 +456,16 @@ function renderDHLTestPage({
                 <div style="margin-bottom:12px;">
                   <label style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">DHL trackingnummer</label>
                   <input name="trackingNumber" type="text" required style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;" />
+                </div>
+
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">Merchant ID (valfri)</label>
+                  <input name="merchant_id" type="text" placeholder="default" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;" />
+                </div>
+
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:13px;font-weight:700;margin-bottom:6px;">Shop domain (valfri)</label>
+                  <input name="shop_domain" type="text" placeholder="example.myshopify.com" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:12px;" />
                 </div>
 
                 <div style="margin-bottom:12px;">
@@ -512,6 +583,8 @@ app.get("/admin/test/dhl", requireCronSecret, async (req, res) => {
 app.get("/admin/test/dhl/create", requireCronSecret, async (req, res) => {
   try {
     const shipment = await createDHLTestShipment({
+      merchant_id: req.query.merchant_id,
+      shop_domain: req.query.shop_domain,
       order_id: req.query.orderId,
       order_name: req.query.orderName,
       email: req.query.email,
@@ -871,23 +944,31 @@ app.get("/track/:trackingNumber", async (req, res) => {
 
 app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
+  const merchantContext = resolveMerchantContextFromRequest(req);
 
   try {
     if (!order || !order.id) {
       return res.sendStatus(200);
     }
 
-    const state = await beginOrderProcessing(order);
+    console.log("🏪 ShipOne merchant resolved:", merchantContext.merchant_id);
+    console.log("🏪 Shopify shop domain:", merchantContext.shop_domain || "unknown");
+
+    const state = await beginOrderProcessing(order, merchantContext);
 
     if (!state.started) {
       return res.sendStatus(200);
     }
 
     if (!order.shipping_address) {
-      await failOrderProcessing(order.id, {
-        order_name: order.name,
-        error: "Missing shipping address"
-      });
+      await failOrderProcessing(
+        order.id,
+        {
+          order_name: order.name,
+          error: "Missing shipping address"
+        },
+        merchantContext
+      );
 
       return res.sendStatus(200);
     }
@@ -904,10 +985,14 @@ app.post("/webhooks/orders-create", async (req, res) => {
     );
 
     if (!selectedOption) {
-      await failOrderProcessing(order.id, {
-        order_name: order.name,
-        error: "No shipping option selected"
-      });
+      await failOrderProcessing(
+        order.id,
+        {
+          order_name: order.name,
+          error: "No shipping option selected"
+        },
+        merchantContext
+      );
 
       return res.sendStatus(200);
     }
@@ -936,37 +1021,45 @@ app.post("/webhooks/orders-create", async (req, res) => {
       );
     }
 
-    await saveShipmentOutcome(order, {
-      shipone_choice: shipOneChoice.normalized,
-      selected_option: selectedOption,
-      selected_carrier: selectedOption.carrier || null,
-      selected_service: selectedOption.name || null,
-      actual_carrier: shipmentResult.carrier || null,
-      fallback_used: shipmentResult.fallbackUsed || false,
-      fallback_from: shipmentResult.fallbackFrom || null,
-      tracking_number: trackingNumber,
-      tracking_url: trackingUrl,
-      shipment_success: shipmentResult.success,
-      fulfillment_success: fulfillmentResult.success || false,
-      shipment_result: shipmentResult,
-      fulfillment_result: fulfillmentResult,
-      error:
-        shipmentResult.success
-          ? fulfillmentResult.success
-            ? null
-            : fulfillmentResult.error || "Shopify fulfillment failed"
-          : shipmentResult.error || "Shipment creation failed"
-    });
+    await saveShipmentOutcome(
+      order,
+      {
+        shipone_choice: shipOneChoice.normalized,
+        selected_option: selectedOption,
+        selected_carrier: selectedOption.carrier || null,
+        selected_service: selectedOption.name || null,
+        actual_carrier: shipmentResult.carrier || null,
+        fallback_used: shipmentResult.fallbackUsed || false,
+        fallback_from: shipmentResult.fallbackFrom || null,
+        tracking_number: trackingNumber,
+        tracking_url: trackingUrl,
+        shipment_success: shipmentResult.success,
+        fulfillment_success: fulfillmentResult.success || false,
+        shipment_result: shipmentResult,
+        fulfillment_result: fulfillmentResult,
+        error:
+          shipmentResult.success
+            ? fulfillmentResult.success
+              ? null
+              : fulfillmentResult.error || "Shopify fulfillment failed"
+            : shipmentResult.error || "Shipment creation failed"
+      },
+      merchantContext
+    );
 
     return res.sendStatus(200);
   } catch (error) {
     console.error("Shipment error:", error.message);
 
     if (order && order.id) {
-      await failOrderProcessing(order.id, {
-        order_name: order.name,
-        error: error.message
-      });
+      await failOrderProcessing(
+        order.id,
+        {
+          order_name: order.name,
+          error: error.message
+        },
+        merchantContext
+      );
     }
 
     return res.sendStatus(200);
@@ -979,6 +1072,9 @@ async function startServer() {
 
     app.listen(PORT, () => {
       console.log(`ShipOne running on port ${PORT}`);
+      console.log(
+        `ShipOne backend URL: https://shipone-production.up.railway.app`
+      );
     });
   } catch (error) {
     console.error("Server start failed:", error.message);

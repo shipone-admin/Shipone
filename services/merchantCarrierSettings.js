@@ -126,6 +126,73 @@ async function getMerchantCarrierMatrix() {
   return result.rows;
 }
 
+async function getMerchantShipmentCarrierSettingsMap(merchantId) {
+  const safeMerchantId = normalizeMerchantId(merchantId);
+
+  await ensureMerchantCarrierDefaults(safeMerchantId);
+
+  const result = await query(
+    `
+      SELECT
+        carrier_key,
+        shipments_enabled,
+        rates_enabled,
+        tracking_enabled
+      FROM merchant_carrier_settings
+      WHERE merchant_id = $1
+    `,
+    [safeMerchantId]
+  );
+
+  const map = {};
+
+  for (const carrierKey of SUPPORTED_CARRIERS) {
+    map[carrierKey] = {
+      carrier_key: carrierKey,
+      shipments_enabled: true,
+      rates_enabled: true,
+      tracking_enabled: true
+    };
+  }
+
+  for (const row of result.rows) {
+    const key = normalizeCarrierKey(row.carrier_key);
+
+    if (!key) {
+      continue;
+    }
+
+    map[key] = {
+      carrier_key: key,
+      shipments_enabled: Boolean(row.shipments_enabled),
+      rates_enabled: Boolean(row.rates_enabled),
+      tracking_enabled: Boolean(row.tracking_enabled)
+    };
+  }
+
+  return map;
+}
+
+async function getEnabledShipmentCarriersForMerchant(merchantId) {
+  const settingsMap = await getMerchantShipmentCarrierSettingsMap(merchantId);
+
+  return SUPPORTED_CARRIERS.filter(
+    (carrierKey) => settingsMap[carrierKey]?.shipments_enabled !== false
+  );
+}
+
+async function isShipmentCarrierEnabledForMerchant(merchantId, carrierKey) {
+  const normalizedCarrierKey = normalizeCarrierKey(carrierKey);
+
+  if (!normalizedCarrierKey || !isSupportedCarrier(normalizedCarrierKey)) {
+    return false;
+  }
+
+  const settingsMap = await getMerchantShipmentCarrierSettingsMap(merchantId);
+
+  return settingsMap[normalizedCarrierKey]?.shipments_enabled !== false;
+}
+
 async function upsertMerchantCarrierSetting({
   merchant_id,
   carrier_key,
@@ -197,5 +264,8 @@ module.exports = {
   listMerchantCarrierSettings,
   listMerchantCarrierSettingsByMerchantId,
   getMerchantCarrierMatrix,
+  getMerchantShipmentCarrierSettingsMap,
+  getEnabledShipmentCarriersForMerchant,
+  isShipmentCarrierEnabledForMerchant,
   upsertMerchantCarrierSetting
 };

@@ -65,6 +65,16 @@ function formatChoice(choice) {
   return choice || "-";
 }
 
+function formatMerchantLabel(merchantId) {
+  const value = String(merchantId || "").trim();
+  return value || "default";
+}
+
+function formatShopDomain(shopDomain) {
+  const value = String(shopDomain || "").trim();
+  return value || "-";
+}
+
 function getStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
 
@@ -206,6 +216,10 @@ function getOrderSnapshot(shipment) {
   return shipment?.shipment_result?.order_snapshot || null;
 }
 
+function getMerchantSnapshot(shipment) {
+  return shipment?.shipment_result?.merchant_snapshot || null;
+}
+
 function renderRoutingPanel(shipment) {
   const routingSnapshot = getRoutingSnapshot(shipment);
 
@@ -302,8 +316,9 @@ function renderRoutingPanel(shipment) {
 function renderCheckoutSnapshotPanel(shipment) {
   const orderSnapshot = getOrderSnapshot(shipment);
   const routingSnapshot = getRoutingSnapshot(shipment);
+  const merchantSnapshot = getMerchantSnapshot(shipment);
 
-  if (!orderSnapshot && !routingSnapshot) {
+  if (!orderSnapshot && !routingSnapshot && !merchantSnapshot) {
     return `
       <div class="card full-width">
         <h2 class="card-title">Checkout & webhook snapshot</h2>
@@ -343,6 +358,14 @@ function renderCheckoutSnapshotPanel(shipment) {
       <h2 class="card-title">Checkout & webhook snapshot</h2>
 
       <div class="info-list">
+        <div class="info-row">
+          <div class="label">Merchant snapshot</div>
+          <div class="value">
+            Merchant: ${escapeHtml(formatMerchantLabel(merchantSnapshot?.merchant_id || shipment.merchant_id))}<br />
+            Shop domain: ${escapeHtml(formatShopDomain(merchantSnapshot?.shop_domain || shipment.shop_domain))}
+          </div>
+        </div>
+
         <div class="info-row">
           <div class="label">Cart-val från kund</div>
           <div class="value">${escapeHtml(orderSnapshot?.shipone_delivery_raw || routingSnapshot?.shipone_delivery_raw || "-")}</div>
@@ -419,6 +442,8 @@ function renderAdminShipmentDetails({
   const liveStatusText = carrierTracking?.statusText
     ? escapeHtml(carrierTracking.statusText)
     : escapeHtml(enrichedShipment.carrier_status_text || "-");
+  const merchantLabel = escapeHtml(formatMerchantLabel(enrichedShipment.merchant_id));
+  const shopDomain = escapeHtml(formatShopDomain(enrichedShipment.shop_domain));
 
   return `
     <!DOCTYPE html>
@@ -943,6 +968,8 @@ function renderAdminShipmentDetails({
             <span class="badge ${statusClass}">${status}</span>
             <span class="badge badge-neutral">${carrier}</span>
             <span class="badge badge-neutral">Order ID: ${orderId}</span>
+            <span class="badge badge-neutral">Merchant: ${merchantLabel}</span>
+            <span class="badge badge-neutral">Shop: ${shopDomain}</span>
           </div>
 
           ${renderSyncBanner(syncState)}
@@ -987,6 +1014,16 @@ function renderAdminShipmentDetails({
               <div class="info-row">
                 <div class="label">Ordernummer</div>
                 <div class="value">${escapeHtml(enrichedShipment.order_number || "-")}</div>
+              </div>
+
+              <div class="info-row">
+                <div class="label">Merchant ID</div>
+                <div class="value">${merchantLabel}</div>
+              </div>
+
+              <div class="info-row">
+                <div class="label">Shop domain</div>
+                <div class="value">${shopDomain}</div>
               </div>
 
               <div class="info-row">

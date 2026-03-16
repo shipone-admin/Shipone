@@ -111,7 +111,54 @@ async function initDatabase() {
     ON shipments (shop_domain)
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS merchants (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS shopify_stores (
+      id SERIAL PRIMARY KEY,
+      shop_domain TEXT NOT NULL UNIQUE,
+      merchant_id TEXT NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT fk_shopify_stores_merchant
+        FOREIGN KEY (merchant_id)
+        REFERENCES merchants (id)
+        ON DELETE CASCADE
+    )
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_merchants_status
+    ON merchants (status)
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_shopify_stores_merchant_id
+    ON shopify_stores (merchant_id)
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_shopify_stores_is_active
+    ON shopify_stores (is_active)
+  `);
+
+  await query(`
+    INSERT INTO merchants (id, name, status)
+    VALUES ('default', 'Default Merchant', 'active')
+    ON CONFLICT (id) DO NOTHING
+  `);
+
   console.log("✅ PostgreSQL shipments table ready");
+  console.log("✅ Merchant registry tables ready");
 }
 
 module.exports = {

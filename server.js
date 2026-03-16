@@ -42,6 +42,8 @@ const {
   resolveMerchantContext,
   upsertMerchant,
   upsertShopifyStore,
+  listMerchants,
+  listShopifyStores,
   normalizeShopDomain,
   normalizeMerchantId
 } = require("./services/merchantStore");
@@ -55,6 +57,7 @@ const {
 const { renderHomePage } = require("./views/homePage");
 const { renderAdminDashboard } = require("./views/adminDashboard");
 const { renderAdminShipmentDetails } = require("./views/adminShipmentDetails");
+const { renderAdminMerchantsPage } = require("./views/adminMerchants");
 
 const app = express();
 app.use(express.json());
@@ -79,6 +82,7 @@ function requireCronSecret(req, res, next) {
   const providedSecret =
     getBearerToken(req) ||
     req.query.token ||
+    req.body?.token ||
     "";
 
   if (!configuredSecret || providedSecret !== configuredSecret) {
@@ -550,6 +554,94 @@ app.get("/admin", async (req, res) => {
         </body>
       </html>
     `);
+  }
+});
+
+app.get("/admin/merchants", requireCronSecret, async (req, res) => {
+  try {
+    const merchants = await listMerchants();
+    const stores = await listShopifyStores();
+
+    return res.status(200).send(
+      renderAdminMerchantsPage({
+        merchants,
+        stores,
+        flashMessage: req.query.message || "",
+        flashType: req.query.type || "success"
+      })
+    );
+  } catch (error) {
+    console.error("Merchant admin page failed:", error.message);
+
+    return res.status(500).send(`
+      <html lang="sv">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>ShipOne Merchant Admin</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; padding: 40px;">
+          <h1>ShipOne Merchant Admin</h1>
+          <p>Det gick inte att läsa merchant admin just nu.</p>
+          <p><a href="/admin?token=${encodeURIComponent(req.query.token || "")}">Tillbaka till admin</a></p>
+        </body>
+      </html>
+    `);
+  }
+});
+
+app.post("/admin/merchants/upsert", requireCronSecret, async (req, res) => {
+  try {
+    await upsertMerchant({
+      id: req.body.id,
+      name: req.body.name,
+      status: req.body.status || "active"
+    });
+
+    return res.redirect(
+      `/admin/merchants?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent("Merchant sparad")}&type=success`
+    );
+  } catch (error) {
+    console.error("Merchant form upsert failed:", error.message);
+
+    return res.redirect(
+      `/admin/merchants?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent(error.message)}&type=error`
+    );
+  }
+});
+
+app.post("/admin/merchants/store/upsert", requireCronSecret, async (req, res) => {
+  try {
+    const merchantId = normalizeMerchantId(req.body.merchant_id);
+    const shopDomain = normalizeShopDomain(req.body.shop_domain);
+
+    if (!merchantId || !shopDomain) {
+      return res.redirect(
+        `/admin/merchants?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent("merchant_id och shop_domain krävs")}&type=error`
+      );
+    }
+
+    await upsertMerchant({
+      id: merchantId,
+      name: req.body.merchant_name || merchantId,
+      status: req.body.merchant_status || "active"
+    });
+
+    await upsertShopifyStore({
+      shop_domain: shopDomain,
+      merchant_id: merchantId,
+      is_active: String(req.body.is_active || "true").toLowerCase() !== "false"
+    });
+
+    return res.redirect(
+      `/admin/merchants?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent("Store-koppling sparad")}&type=success`
+    );
+  } catch (error) {
+    console.error("Merchant store form upsert failed:", error.message);
+
+    return res.redirect(
+      `/admin/merchants?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent(error.message)}&type=error`
+    );
   }
 });
 

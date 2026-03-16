@@ -126,7 +126,7 @@ async function getMerchantCarrierMatrix() {
   return result.rows;
 }
 
-async function getMerchantShipmentCarrierSettingsMap(merchantId) {
+async function getMerchantCarrierSettingsMap(merchantId) {
   const safeMerchantId = normalizeMerchantId(merchantId);
 
   await ensureMerchantCarrierDefaults(safeMerchantId);
@@ -174,10 +174,26 @@ async function getMerchantShipmentCarrierSettingsMap(merchantId) {
 }
 
 async function getEnabledShipmentCarriersForMerchant(merchantId) {
-  const settingsMap = await getMerchantShipmentCarrierSettingsMap(merchantId);
+  const settingsMap = await getMerchantCarrierSettingsMap(merchantId);
 
   return SUPPORTED_CARRIERS.filter(
     (carrierKey) => settingsMap[carrierKey]?.shipments_enabled !== false
+  );
+}
+
+async function getEnabledRateCarriersForMerchant(merchantId) {
+  const settingsMap = await getMerchantCarrierSettingsMap(merchantId);
+
+  return SUPPORTED_CARRIERS.filter(
+    (carrierKey) => settingsMap[carrierKey]?.rates_enabled !== false
+  );
+}
+
+async function getEnabledTrackingCarriersForMerchant(merchantId) {
+  const settingsMap = await getMerchantCarrierSettingsMap(merchantId);
+
+  return SUPPORTED_CARRIERS.filter(
+    (carrierKey) => settingsMap[carrierKey]?.tracking_enabled !== false
   );
 }
 
@@ -188,9 +204,33 @@ async function isShipmentCarrierEnabledForMerchant(merchantId, carrierKey) {
     return false;
   }
 
-  const settingsMap = await getMerchantShipmentCarrierSettingsMap(merchantId);
+  const settingsMap = await getMerchantCarrierSettingsMap(merchantId);
 
   return settingsMap[normalizedCarrierKey]?.shipments_enabled !== false;
+}
+
+async function isRateCarrierEnabledForMerchant(merchantId, carrierKey) {
+  const normalizedCarrierKey = normalizeCarrierKey(carrierKey);
+
+  if (!normalizedCarrierKey || !isSupportedCarrier(normalizedCarrierKey)) {
+    return false;
+  }
+
+  const settingsMap = await getMerchantCarrierSettingsMap(merchantId);
+
+  return settingsMap[normalizedCarrierKey]?.rates_enabled !== false;
+}
+
+async function isTrackingCarrierEnabledForMerchant(merchantId, carrierKey) {
+  const normalizedCarrierKey = normalizeCarrierKey(carrierKey);
+
+  if (!normalizedCarrierKey || !isSupportedCarrier(normalizedCarrierKey)) {
+    return false;
+  }
+
+  const settingsMap = await getMerchantCarrierSettingsMap(merchantId);
+
+  return settingsMap[normalizedCarrierKey]?.tracking_enabled !== false;
 }
 
 async function upsertMerchantCarrierSetting({
@@ -264,8 +304,12 @@ module.exports = {
   listMerchantCarrierSettings,
   listMerchantCarrierSettingsByMerchantId,
   getMerchantCarrierMatrix,
-  getMerchantShipmentCarrierSettingsMap,
+  getMerchantCarrierSettingsMap,
   getEnabledShipmentCarriersForMerchant,
+  getEnabledRateCarriersForMerchant,
+  getEnabledTrackingCarriersForMerchant,
   isShipmentCarrierEnabledForMerchant,
+  isRateCarrierEnabledForMerchant,
+  isTrackingCarrierEnabledForMerchant,
   upsertMerchantCarrierSetting
 };

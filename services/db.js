@@ -157,8 +157,53 @@ async function initDatabase() {
     ON CONFLICT (id) DO NOTHING
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS merchant_carrier_settings (
+      id SERIAL PRIMARY KEY,
+      merchant_id TEXT NOT NULL,
+      carrier_key TEXT NOT NULL,
+      shipments_enabled BOOLEAN NOT NULL DEFAULT true,
+      rates_enabled BOOLEAN NOT NULL DEFAULT true,
+      tracking_enabled BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT fk_merchant_carrier_settings_merchant
+        FOREIGN KEY (merchant_id)
+        REFERENCES merchants (id)
+        ON DELETE CASCADE,
+      CONSTRAINT uq_merchant_carrier_settings_unique
+        UNIQUE (merchant_id, carrier_key)
+    )
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_merchant_carrier_settings_merchant_id
+    ON merchant_carrier_settings (merchant_id)
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_merchant_carrier_settings_carrier_key
+    ON merchant_carrier_settings (carrier_key)
+  `);
+
+  await query(`
+    INSERT INTO merchant_carrier_settings (
+      merchant_id,
+      carrier_key,
+      shipments_enabled,
+      rates_enabled,
+      tracking_enabled
+    )
+    VALUES
+      ('default', 'postnord', true, true, true),
+      ('default', 'dhl', true, true, true),
+      ('default', 'budbee', true, true, true)
+    ON CONFLICT (merchant_id, carrier_key) DO NOTHING
+  `);
+
   console.log("✅ PostgreSQL shipments table ready");
   console.log("✅ Merchant registry tables ready");
+  console.log("✅ Merchant carrier settings table ready");
 }
 
 module.exports = {

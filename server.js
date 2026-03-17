@@ -56,9 +56,8 @@ const {
 } = require("./services/merchantCarrierSettings");
 
 const {
-  verifyShopifyWebhook,
-  resolveShopifyWebhookSecret
-} = require("./services/shopifyWebhookVerify");
+  migrateShipmentMerchantIds
+} = require("./services/merchantDataMigration");
 
 const {
   renderTrackingPage,
@@ -75,25 +74,8 @@ const {
 } = require("./views/adminMerchantCarrierSettings");
 
 const app = express();
-
-function captureRawBody(req, res, buffer) {
-  if (buffer && buffer.length > 0) {
-    req.rawBody = Buffer.from(buffer);
-  }
-}
-
-app.use(
-  express.json({
-    verify: captureRawBody
-  })
-);
-
-app.use(
-  express.urlencoded({
-    extended: true,
-    verify: captureRawBody
-  })
-);
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 8080;
 
@@ -884,7 +866,7 @@ app.post("/admin/shipment/:orderId/sync", async (req, res) => {
   try {
     const result = await syncPostNordTrackingByOrderId(req.params.orderId);
 
-    if (!result.success) {
+    if (!result.success && !result.skipped) {
       return res.redirect(
         `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=error`
       );
@@ -1136,6 +1118,21 @@ app.get("/admin/db/migrate-rate-limit", requireCronSecret, async (req, res) => {
   }
 });
 
+app.get("/admin/db/migrate-shipment-merchants", requireCronSecret, async (req, res) => {
+  try {
+    const result = await migrateShipmentMerchantIds();
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Shipment merchant migration failed:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.get("/admin/merchant/upsert", requireCronSecret, async (req, res) => {
   try {
     const merchant = await upsertMerchant({
@@ -1255,47 +1252,9 @@ app.get("/track/:trackingNumber", async (req, res) => {
 
 app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
+  const merchantContext = await resolveMerchantContextFromRequest(req);
 
   try {
-    const shopDomain = normalizeShopDomain(req.headers["x-shopify-shop-domain"]);
-    const hmacHeader = String(req.headers["x-shopify-hmac-sha256"] || "").trim();
-
-    const webhookSecretResolution = await resolveShopifyWebhookSecret({
-      shopDomain
-    });
-
-    if (!webhookSecretResolution.webhook_secret) {
-      console.error("❌ Missing Shopify webhook secret for shop:", shopDomain || "unknown");
-
-      return res.status(401).json({
-        success: false,
-        error: "Unauthorized"
-      });
-    }
-
-    const webhookValid = verifyShopifyWebhook(
-      req.rawBody,
-      hmacHeader,
-      webhookSecretResolution.webhook_secret
-    );
-
-    if (!webhookValid) {
-      console.error("❌ Invalid Shopify webhook signature");
-      console.error("🏪 Webhook shop:", shopDomain || "unknown");
-      console.error("🏪 Webhook secret source:", webhookSecretResolution.source);
-
-      return res.status(401).json({
-        success: false,
-        error: "Unauthorized"
-      });
-    }
-
-    console.log("✅ Shopify webhook verified");
-    console.log("🏪 Webhook shop:", webhookSecretResolution.shop_domain || shopDomain || "unknown");
-    console.log("🏪 Webhook secret source:", webhookSecretResolution.source);
-
-    const merchantContext = await resolveMerchantContextFromRequest(req);
-
     if (!order || !order.id) {
       return res.sendStatus(200);
     }
@@ -1412,8 +1371,6 @@ app.post("/webhooks/orders-create", async (req, res) => {
     console.error("Shipment error:", error.message);
 
     if (order && order.id) {
-      const merchantContext = await resolveMerchantContextFromRequest(req);
-
       await failOrderProcessing(
         order.id,
         {

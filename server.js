@@ -56,10 +56,6 @@ const {
 } = require("./services/merchantCarrierSettings");
 
 const {
-  migrateShipmentMerchantIds
-} = require("./services/merchantDataMigration");
-
-const {
   renderTrackingPage,
   renderTrackingNotFoundPage,
   renderTrackingErrorPage
@@ -864,9 +860,31 @@ app.get("/admin/test/dhl/delete", requireCronSecret, async (req, res) => {
 
 app.post("/admin/shipment/:orderId/sync", async (req, res) => {
   try {
+    const shipment = await findShipmentByOrderId(req.params.orderId);
+
+    if (!shipment) {
+      return res.redirect(
+        `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=error`
+      );
+    }
+
+    const trackingAllowed = await isTrackingAllowedForShipment(shipment);
+
+    if (!trackingAllowed) {
+      return res.redirect(
+        `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=blocked`
+      );
+    }
+
     const result = await syncPostNordTrackingByOrderId(req.params.orderId);
 
-    if (!result.success && !result.skipped) {
+    if (!result.success) {
+      if (result.statusCode === 403) {
+        return res.redirect(
+          `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=blocked`
+        );
+      }
+
       return res.redirect(
         `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=error`
       );
@@ -1110,21 +1128,6 @@ app.get("/admin/db/migrate-rate-limit", requireCronSecret, async (req, res) => {
     });
   } catch (error) {
     console.error("Migration failed:", error.message);
-
-    return res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get("/admin/db/migrate-shipment-merchants", requireCronSecret, async (req, res) => {
-  try {
-    const result = await migrateShipmentMerchantIds();
-
-    return res.status(200).json(result);
-  } catch (error) {
-    console.error("Shipment merchant migration failed:", error.message);
 
     return res.status(500).json({
       success: false,

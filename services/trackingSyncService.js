@@ -1,25 +1,27 @@
 const { query } = require("./db");
 const { fetchPostNordTracking } = require("./postnordTracking");
-const { fetchDHLTracking } = require("./dhlTracking");
 const { saveCarrierTrackingSnapshot } = require("./trackingSyncStore");
-const { getDisplayStatus } = require("./trackingStatus");
-const { buildTrackingEvents } = require("./trackingEvents");
+const {
+  isTrackingCarrierEnabledForMerchant
+} = require("./merchantCarrierSettings");
 
-async function findShipmentByTrackingNumber(trackingNumber) {
-  const result = await query(
-    `
-      SELECT *
-      FROM shipments
-      WHERE tracking_number = $1
-      LIMIT 1
-    `,
-    [trackingNumber]
-  );
+function normalizeOrderId(value) {
+  const text = String(value || "").trim();
+  return text || null;
+}
 
-  return result.rows[0] || null;
+function normalizeTrackingNumber(value) {
+  const text = String(value || "").trim();
+  return text || null;
 }
 
 async function findShipmentByOrderId(orderId) {
+  const safeOrderId = normalizeOrderId(orderId);
+
+  if (!safeOrderId) {
+    return null;
+  }
+
   const result = await query(
     `
       SELECT *
@@ -27,38 +29,70 @@ async function findShipmentByOrderId(orderId) {
       WHERE order_id = $1
       LIMIT 1
     `,
-    [orderId]
+    [safeOrderId]
   );
 
   return result.rows[0] || null;
 }
 
-async function fetchCarrierTrackingForShipment(shipment) {
-  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+async function findShipmentByTrackingNumber(trackingNumber) {
+  const safeTrackingNumber = normalizeTrackingNumber(trackingNumber);
 
-  if (actualCarrier === "postnord") {
-    return fetchPostNordTracking(shipment.tracking_number);
+  if (!safeTrackingNumber) {
+    return null;
   }
 
-  if (actualCarrier === "dhl") {
-    return fetchDHLTracking(shipment.tracking_number);
-  }
+  const result = await query(
+    `
+      SELECT *
+      FROM shipments
+      WHERE tracking_number = $1
+      ORDER BY id DESC
+      LIMIT 1
+    `,
+    [safeTrackingNumber]
+  );
 
-  return {
-    success: false,
-    skipped: true,
-    reason: "Manual live tracking sync is only supported for PostNord and DHL shipments",
-    events: [],
-    statusText: shipment?.carrier_status_text || null,
-    eventCount: shipment?.carrier_event_count || 0,
-    latestEventAt: shipment?.carrier_last_event_at || null
-  };
+  return result.rows[0] || null;
 }
 
-async function syncPostNordTrackingForShipment(shipment) {
+async function reloadShipmentById(id) {
+  const result = await query(
+    `
+      SELECT *
+      FROM shipments
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [id]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function markTrackingDisabledForShipment(shipment, reason) {
+  if (!shipment?.id) {
+    return;
+  }
+
+  await query(
+    `
+      UPDATE shipments
+      SET
+        carrier_last_sync_status = $2,
+        carrier_last_synced_at = NOW(),
+        carrier_next_sync_at = NULL,
+        updated_at = NOW()
+      WHERE id = $1
+    `,
+    [shipment.id, reason || "disabled_by_merchant"]
+  );
+}
+
+async function canSyncPostNordTrackingForShipment(shipment) {
   if (!shipment) {
     return {
-      success: false,
+      allowed: false,
       statusCode: 404,
       error: "Shipment not found"
     };
@@ -66,102 +100,113 @@ async function syncPostNordTrackingForShipment(shipment) {
 
   const actualCarrier = String(shipment.actual_carrier || "").toLowerCase();
 
-  if (actualCarrier !== "postnord" && actualCarrier !== "dhl") {
+  if (actualCarrier !== "postnord") {
     return {
-      success: false,
+      allowed: false,
       statusCode: 400,
-      error: "Manual live tracking sync is only supported for PostNord and DHL shipments",
-      shipment: {
-        id: shipment.id,
-        order_id: shipment.order_id,
-        tracking_number: shipment.tracking_number,
-        actual_carrier: shipment.actual_carrier
-      }
+      error: "Tracking sync only supports PostNord shipments"
     };
   }
 
   if (!shipment.tracking_number) {
     return {
-      success: false,
+      allowed: false,
       statusCode: 400,
-      error: "Shipment is missing tracking number",
-      shipment: {
-        id: shipment.id,
-        order_id: shipment.order_id,
-        actual_carrier: shipment.actual_carrier
-      }
+      error: "Shipment is missing tracking number"
     };
   }
 
-  const carrierTracking = await fetchCarrierTrackingForShipment(shipment);
-  const snapshot = await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
+  const merchantId = String(shipment.merchant_id || "default").trim().toLowerCase();
 
-  const refreshedResult = await query(
-    `
-      SELECT *
-      FROM shipments
-      WHERE id = $1
-      LIMIT 1
-    `,
-    [shipment.id]
+  const trackingEnabled = await isTrackingCarrierEnabledForMerchant(
+    merchantId,
+    "postnord"
   );
 
-  const refreshedShipment = refreshedResult.rows[0] || shipment;
+  if (!trackingEnabled) {
+    return {
+      allowed: false,
+      statusCode: 403,
+      error: `Tracking is disabled for merchant ${merchantId} and carrier postnord`
+    };
+  }
 
-  const displayStatus = getDisplayStatus({
-    shipment: refreshedShipment,
-    carrierTracking
-  });
+  return {
+    allowed: true,
+    statusCode: 200
+  };
+}
 
-  const events = buildTrackingEvents({
-    shipment: refreshedShipment,
-    externalEvents: carrierTracking.events,
-    externalSource: actualCarrier
-  });
+async function syncShipment(shipment) {
+  const eligibility = await canSyncPostNordTrackingForShipment(shipment);
+
+  if (!eligibility.allowed) {
+    if (eligibility.statusCode === 403) {
+      await markTrackingDisabledForShipment(shipment, "disabled_by_merchant");
+    }
+
+    return {
+      success: false,
+      statusCode: eligibility.statusCode,
+      error: eligibility.error,
+      shipment
+    };
+  }
+
+  const carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
+
+  if (!carrierTracking.success) {
+    return {
+      success: false,
+      statusCode: 502,
+      error: carrierTracking.error || "PostNord tracking fetch failed",
+      shipment,
+      carrierTracking
+    };
+  }
+
+  await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
+
+  const updatedShipment = await reloadShipmentById(shipment.id);
 
   return {
     success: true,
     statusCode: 200,
-    shipment: {
-      id: refreshedShipment.id,
-      order_id: refreshedShipment.order_id,
-      order_name: refreshedShipment.order_name,
-      tracking_number: refreshedShipment.tracking_number,
-      actual_carrier: refreshedShipment.actual_carrier,
-      carrier_status_text: refreshedShipment.carrier_status_text,
-      carrier_last_event_at: refreshedShipment.carrier_last_event_at,
-      carrier_event_count: refreshedShipment.carrier_event_count,
-      carrier_last_synced_at: refreshedShipment.carrier_last_synced_at,
-      carrier_next_sync_at: refreshedShipment.carrier_next_sync_at,
-      carrier_sync_attempts: refreshedShipment.carrier_sync_attempts,
-      carrier_last_sync_status: refreshedShipment.carrier_last_sync_status
-    },
-    carrierTracking: {
-      success: carrierTracking.success,
-      skipped: carrierTracking.skipped,
-      reason: carrierTracking.reason,
-      statusText: carrierTracking.statusText,
-      eventCount: carrierTracking.eventCount,
-      latestEventAt: carrierTracking.latestEventAt
-    },
-    snapshot,
-    displayStatus,
-    events
+    shipment: updatedShipment || shipment,
+    carrierTracking,
+    syncedAt: new Date().toISOString()
   };
-}
-
-async function syncPostNordTrackingByTrackingNumber(trackingNumber) {
-  const shipment = await findShipmentByTrackingNumber(trackingNumber);
-  return syncPostNordTrackingForShipment(shipment);
 }
 
 async function syncPostNordTrackingByOrderId(orderId) {
   const shipment = await findShipmentByOrderId(orderId);
-  return syncPostNordTrackingForShipment(shipment);
+
+  if (!shipment) {
+    return {
+      success: false,
+      statusCode: 404,
+      error: "Shipment not found for order id"
+    };
+  }
+
+  return syncShipment(shipment);
+}
+
+async function syncPostNordTrackingByTrackingNumber(trackingNumber) {
+  const shipment = await findShipmentByTrackingNumber(trackingNumber);
+
+  if (!shipment) {
+    return {
+      success: false,
+      statusCode: 404,
+      error: "Shipment not found for tracking number"
+    };
+  }
+
+  return syncShipment(shipment);
 }
 
 module.exports = {
-  syncPostNordTrackingForShipment,
   syncPostNordTrackingByTrackingNumber,
   syncPostNordTrackingByOrderId
 };

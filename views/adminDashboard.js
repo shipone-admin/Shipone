@@ -73,6 +73,16 @@ function formatHealthLabel(health) {
   return "Alla";
 }
 
+function formatPolicyLabel(policy) {
+  const normalized = String(policy || "").toLowerCase();
+
+  if (normalized === "ok") return "Policy OK";
+  if (normalized === "fallback") return "Fallback";
+  if (normalized === "blocked") return "Tracking blockerad";
+
+  return "Alla";
+}
+
 function formatShipOneChoice(choice) {
   const normalized = String(choice || "").toUpperCase();
 
@@ -137,8 +147,31 @@ function matchesHealthFilter(shipment, healthFilter) {
 function isMerchantTrackingBlocked(shipment) {
   return (
     String(shipment?.carrier_last_sync_status || "").toLowerCase() ===
-    "disabled_by_merchant"
+      "disabled_by_merchant" ||
+    String(shipment?.carrier_last_sync_status || "").toLowerCase() === "disabled"
   );
+}
+
+function getPolicyFilterValue(shipment) {
+  if (isMerchantTrackingBlocked(shipment)) {
+    return "blocked";
+  }
+
+  if (Boolean(shipment?.fallback_used)) {
+    return "fallback";
+  }
+
+  return "ok";
+}
+
+function matchesPolicyFilter(shipment, policyFilter) {
+  const normalizedFilter = String(policyFilter || "").toLowerCase();
+
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  return getPolicyFilterValue(shipment) === normalizedFilter;
 }
 
 function buildStats(shipments) {
@@ -153,7 +186,7 @@ function buildStats(shipments) {
   ).length;
   const problems = list.filter((shipment) => shipment.health === "problem").length;
   const waitingForNextSync = list.filter((shipment) => hasUpcomingSync(shipment)).length;
-  const blockedTrackingCount = list.filter((shipment) =>
+  const trackingBlockedCount = list.filter((shipment) =>
     isMerchantTrackingBlocked(shipment)
   ).length;
 
@@ -163,7 +196,7 @@ function buildStats(shipments) {
     completed,
     problems,
     waitingForNextSync,
-    blockedTrackingCount
+    trackingBlockedCount
   };
 }
 
@@ -477,9 +510,12 @@ function renderAdminDashboard({
 } = {}) {
   const enrichedShipments = enrichShipmentsWithHealth(shipments);
   const health = String(filters.health || "").trim().toLowerCase();
+  const policy = String(filters.policy || "").trim().toLowerCase();
 
-  const visibleShipments = enrichedShipments.filter((shipment) =>
-    matchesHealthFilter(shipment, health)
+  const visibleShipments = enrichedShipments.filter(
+    (shipment) =>
+      matchesHealthFilter(shipment, health) &&
+      matchesPolicyFilter(shipment, policy)
   );
 
   const q = escapeHtml(filters.q || "");
@@ -663,7 +699,7 @@ function renderAdminDashboard({
 
         .stat-card.blocked {
           border-color: #fed7aa;
-          background: linear-gradient(180deg, #fffaf5 0%, #fff7ed 100%);
+          background: linear-gradient(180deg, #fffdfa 0%, #fff7ed 100%);
         }
 
         .stat-label {
@@ -700,7 +736,7 @@ function renderAdminDashboard({
 
         .filters-form {
           display: grid;
-          grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto auto;
+          grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr auto auto;
           gap: 12px;
           align-items: end;
         }
@@ -1262,7 +1298,7 @@ function renderAdminDashboard({
 
             <div class="stat-card blocked">
               <div class="stat-label">Tracking blockerade</div>
-              <div class="stat-value">${stats.blockedTrackingCount}</div>
+              <div class="stat-value">${stats.trackingBlockedCount}</div>
             </div>
           </div>
         </div>
@@ -1315,6 +1351,16 @@ function renderAdminDashboard({
             </div>
 
             <div class="field">
+              <label for="policy">Policy</label>
+              <select class="select" id="policy" name="policy">
+                <option value="" ${policy === "" ? "selected" : ""}>Alla</option>
+                <option value="ok" ${policy === "ok" ? "selected" : ""}>Policy OK</option>
+                <option value="fallback" ${policy === "fallback" ? "selected" : ""}>Fallback</option>
+                <option value="blocked" ${policy === "blocked" ? "selected" : ""}>Tracking blockerad</option>
+              </select>
+            </div>
+
+            <div class="field">
               <label for="merchant">Merchant</label>
               <input
                 class="input"
@@ -1331,13 +1377,14 @@ function renderAdminDashboard({
           </form>
 
           ${
-            filters.q || filters.status || filters.carrier || health || merchant
+            filters.q || filters.status || filters.carrier || health || policy || merchant
               ? `
                 <div class="active-filters">
                   ${filters.q ? `<div class="filter-pill">Sök: ${escapeHtml(filters.q)}</div>` : ""}
                   ${filters.status ? `<div class="filter-pill">Status: ${escapeHtml(formatShipmentStatus(filters.status))}</div>` : ""}
                   ${filters.carrier ? `<div class="filter-pill">Carrier: ${escapeHtml(formatCarrierName(filters.carrier))}</div>` : ""}
                   ${health ? `<div class="filter-pill">Health: ${escapeHtml(formatHealthLabel(health))}</div>` : ""}
+                  ${policy ? `<div class="filter-pill">Policy: ${escapeHtml(formatPolicyLabel(policy))}</div>` : ""}
                   ${merchant ? `<div class="filter-pill">Merchant: ${escapeHtml(merchant)}</div>` : ""}
                 </div>
               `

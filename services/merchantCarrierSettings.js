@@ -16,8 +16,26 @@ function isSupportedCarrier(carrierKey) {
   return SUPPORTED_CARRIERS.includes(normalizeCarrierKey(carrierKey));
 }
 
-async function ensureMerchantCarrierDefaults(merchantId) {
+/**
+ * 🔥 NY: säkerställ att merchant finns innan vi använder den
+ */
+async function ensureMerchantExists(merchantId) {
   const safeMerchantId = normalizeMerchantId(merchantId);
+
+  await query(
+    `
+      INSERT INTO merchants (id, name, status, created_at, updated_at)
+      VALUES ($1, $2, 'active', NOW(), NOW())
+      ON CONFLICT (id) DO NOTHING
+    `,
+    [safeMerchantId, safeMerchantId]
+  );
+
+  return safeMerchantId;
+}
+
+async function ensureMerchantCarrierDefaults(merchantId) {
+  const safeMerchantId = await ensureMerchantExists(merchantId);
 
   for (const carrierKey of SUPPORTED_CARRIERS) {
     await query(
@@ -48,27 +66,23 @@ async function ensureMerchantCarrierDefaults(merchantId) {
 }
 
 async function listMerchantCarrierSettings() {
-  const result = await query(
-    `
-      SELECT
-        s.id,
-        s.merchant_id,
-        s.carrier_key,
-        s.shipments_enabled,
-        s.rates_enabled,
-        s.tracking_enabled,
-        s.created_at,
-        s.updated_at,
-        m.name AS merchant_name,
-        m.status AS merchant_status
-      FROM merchant_carrier_settings s
-      INNER JOIN merchants m
-        ON m.id = s.merchant_id
-      ORDER BY
-        s.merchant_id ASC,
-        s.carrier_key ASC
-    `
-  );
+  const result = await query(`
+    SELECT
+      s.id,
+      s.merchant_id,
+      s.carrier_key,
+      s.shipments_enabled,
+      s.rates_enabled,
+      s.tracking_enabled,
+      s.created_at,
+      s.updated_at,
+      m.name AS merchant_name,
+      m.status AS merchant_status
+    FROM merchant_carrier_settings s
+    INNER JOIN merchants m
+      ON m.id = s.merchant_id
+    ORDER BY s.merchant_id ASC, s.carrier_key ASC
+  `);
 
   return result.rows;
 }
@@ -80,18 +94,10 @@ async function listMerchantCarrierSettingsByMerchantId(merchantId) {
 
   const result = await query(
     `
-      SELECT
-        s.id,
-        s.merchant_id,
-        s.carrier_key,
-        s.shipments_enabled,
-        s.rates_enabled,
-        s.tracking_enabled,
-        s.created_at,
-        s.updated_at
-      FROM merchant_carrier_settings s
-      WHERE s.merchant_id = $1
-      ORDER BY s.carrier_key ASC
+      SELECT *
+      FROM merchant_carrier_settings
+      WHERE merchant_id = $1
+      ORDER BY carrier_key ASC
     `,
     [safeMerchantId]
   );
@@ -100,28 +106,24 @@ async function listMerchantCarrierSettingsByMerchantId(merchantId) {
 }
 
 async function getMerchantCarrierMatrix() {
-  const result = await query(
-    `
-      SELECT
-        m.id AS merchant_id,
-        m.name AS merchant_name,
-        m.status AS merchant_status,
-        c.carrier_key,
-        COALESCE(s.shipments_enabled, true) AS shipments_enabled,
-        COALESCE(s.rates_enabled, true) AS rates_enabled,
-        COALESCE(s.tracking_enabled, true) AS tracking_enabled
-      FROM merchants m
-      CROSS JOIN (
-        SELECT UNNEST(ARRAY['postnord', 'dhl', 'budbee']) AS carrier_key
-      ) c
-      LEFT JOIN merchant_carrier_settings s
-        ON s.merchant_id = m.id
-       AND s.carrier_key = c.carrier_key
-      ORDER BY
-        m.id ASC,
-        c.carrier_key ASC
-    `
-  );
+  const result = await query(`
+    SELECT
+      m.id AS merchant_id,
+      m.name AS merchant_name,
+      m.status AS merchant_status,
+      c.carrier_key,
+      COALESCE(s.shipments_enabled, true) AS shipments_enabled,
+      COALESCE(s.rates_enabled, true) AS rates_enabled,
+      COALESCE(s.tracking_enabled, true) AS tracking_enabled
+    FROM merchants m
+    CROSS JOIN (
+      SELECT UNNEST(ARRAY['postnord', 'dhl', 'budbee']) AS carrier_key
+    ) c
+    LEFT JOIN merchant_carrier_settings s
+      ON s.merchant_id = m.id
+     AND s.carrier_key = c.carrier_key
+    ORDER BY m.id ASC, c.carrier_key ASC
+  `);
 
   return result.rows;
 }
@@ -158,9 +160,7 @@ async function getMerchantCarrierSettingsMap(merchantId) {
   for (const row of result.rows) {
     const key = normalizeCarrierKey(row.carrier_key);
 
-    if (!key) {
-      continue;
-    }
+    if (!key) continue;
 
     map[key] = {
       carrier_key: key,
@@ -240,12 +240,8 @@ async function upsertMerchantCarrierSetting({
   rates_enabled = true,
   tracking_enabled = true
 }) {
-  const safeMerchantId = normalizeMerchantId(merchant_id);
+  const safeMerchantId = await ensureMerchantExists(merchant_id);
   const safeCarrierKey = normalizeCarrierKey(carrier_key);
-
-  if (!safeMerchantId) {
-    throw new Error("Missing merchant id");
-  }
 
   if (!safeCarrierKey) {
     throw new Error("Missing carrier key");
@@ -266,15 +262,7 @@ async function upsertMerchantCarrierSetting({
         created_at,
         updated_at
       )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        $5,
-        NOW(),
-        NOW()
-      )
+      VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
       ON CONFLICT (merchant_id, carrier_key)
       DO UPDATE SET
         shipments_enabled = EXCLUDED.shipments_enabled,

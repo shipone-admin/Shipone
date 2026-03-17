@@ -65,16 +65,6 @@ function formatChoice(choice) {
   return choice || "-";
 }
 
-function formatMerchantLabel(merchantId) {
-  const value = String(merchantId || "").trim();
-  return value || "default";
-}
-
-function formatShopDomain(shopDomain) {
-  const value = String(shopDomain || "").trim();
-  return value || "-";
-}
-
 function getStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
 
@@ -216,8 +206,98 @@ function getOrderSnapshot(shipment) {
   return shipment?.shipment_result?.order_snapshot || null;
 }
 
-function getMerchantSnapshot(shipment) {
-  return shipment?.shipment_result?.merchant_snapshot || null;
+function isTrackingBlockedByMerchant(shipment) {
+  return (
+    String(shipment?.carrier_last_sync_status || "").toLowerCase() ===
+    "disabled_by_merchant"
+  );
+}
+
+function buildMerchantPolicyState(shipment) {
+  const selectedCarrier = String(shipment?.selected_carrier || "").toLowerCase();
+  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+  const fallbackUsed = Boolean(shipment?.fallback_used);
+  const trackingBlocked = isTrackingBlockedByMerchant(shipment);
+
+  let summary = "Merchant-policy ser ut att tillåta detta shipmentflöde.";
+  let toneClass = "policy-state-ok";
+
+  if (trackingBlocked) {
+    summary = `Live tracking är blockerad av merchant-policy för ${formatCarrierName(actualCarrier)}.`;
+    toneClass = "policy-state-blocked";
+  } else if (fallbackUsed && selectedCarrier && actualCarrier && selectedCarrier !== actualCarrier) {
+    summary = `Merchant-regler och/eller carrierlogik ledde till fallback från ${formatCarrierName(selectedCarrier)} till ${formatCarrierName(actualCarrier)}.`;
+    toneClass = "policy-state-warning";
+  }
+
+  return {
+    summary,
+    toneClass,
+    shipmentCarrierAllowed:
+      shipment?.shipment_success === true ? "Ja" : "Oklart",
+    trackingAllowed: trackingBlocked ? "Nej" : "Ja",
+    fallbackUsed: fallbackUsed ? "Ja" : "Nej",
+    selectedCarrier: formatCarrierName(selectedCarrier),
+    actualCarrier: formatCarrierName(actualCarrier)
+  };
+}
+
+function renderMerchantPolicyPanel(shipment) {
+  const policy = buildMerchantPolicyState(shipment);
+
+  return `
+    <div class="card full-width">
+      <h2 class="card-title">Merchant policy</h2>
+
+      <div class="policy-panel ${escapeHtml(policy.toneClass)}">
+        <div class="policy-summary">
+          ${escapeHtml(policy.summary)}
+        </div>
+
+        <div class="info-list">
+          <div class="info-row">
+            <div class="label">Merchant ID</div>
+            <div class="value">${escapeHtml(shipment.merchant_id || "default")}</div>
+          </div>
+
+          <div class="info-row">
+            <div class="label">Shop domain</div>
+            <div class="value">${escapeHtml(shipment.shop_domain || "-")}</div>
+          </div>
+
+          <div class="info-row">
+            <div class="label">Vald carrier</div>
+            <div class="value">${escapeHtml(policy.selectedCarrier || "-")}</div>
+          </div>
+
+          <div class="info-row">
+            <div class="label">Faktisk carrier</div>
+            <div class="value">${escapeHtml(policy.actualCarrier || "-")}</div>
+          </div>
+
+          <div class="info-row">
+            <div class="label">Fallback använd</div>
+            <div class="value">${escapeHtml(policy.fallbackUsed)}</div>
+          </div>
+
+          <div class="info-row">
+            <div class="label">Shipment tillåtet</div>
+            <div class="value">${escapeHtml(policy.shipmentCarrierAllowed)}</div>
+          </div>
+
+          <div class="info-row">
+            <div class="label">Tracking tillåten</div>
+            <div class="value">${escapeHtml(policy.trackingAllowed)}</div>
+          </div>
+
+          <div class="info-row">
+            <div class="label">Senaste sync-status</div>
+            <div class="value">${escapeHtml(shipment.carrier_last_sync_status || "-")}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function renderRoutingPanel(shipment) {
@@ -316,9 +396,9 @@ function renderRoutingPanel(shipment) {
 function renderCheckoutSnapshotPanel(shipment) {
   const orderSnapshot = getOrderSnapshot(shipment);
   const routingSnapshot = getRoutingSnapshot(shipment);
-  const merchantSnapshot = getMerchantSnapshot(shipment);
+  const merchantSnapshot = shipment?.shipment_result?.merchant_snapshot || null;
 
-  if (!orderSnapshot && !routingSnapshot && !merchantSnapshot) {
+  if (!orderSnapshot && !routingSnapshot) {
     return `
       <div class="card full-width">
         <h2 class="card-title">Checkout & webhook snapshot</h2>
@@ -361,8 +441,8 @@ function renderCheckoutSnapshotPanel(shipment) {
         <div class="info-row">
           <div class="label">Merchant snapshot</div>
           <div class="value">
-            Merchant: ${escapeHtml(formatMerchantLabel(merchantSnapshot?.merchant_id || shipment.merchant_id))}<br />
-            Shop domain: ${escapeHtml(formatShopDomain(merchantSnapshot?.shop_domain || shipment.shop_domain))}
+            Merchant: ${escapeHtml(merchantSnapshot?.merchant_id || shipment.merchant_id || "-")}<br />
+            Shop domain: ${escapeHtml(merchantSnapshot?.shop_domain || shipment.shop_domain || "-")}
           </div>
         </div>
 
@@ -442,8 +522,6 @@ function renderAdminShipmentDetails({
   const liveStatusText = carrierTracking?.statusText
     ? escapeHtml(carrierTracking.statusText)
     : escapeHtml(enrichedShipment.carrier_status_text || "-");
-  const merchantLabel = escapeHtml(formatMerchantLabel(enrichedShipment.merchant_id));
-  const shopDomain = escapeHtml(formatShopDomain(enrichedShipment.shop_domain));
 
   return `
     <!DOCTYPE html>
@@ -919,6 +997,35 @@ function renderAdminShipmentDetails({
           color: var(--neutral-text);
         }
 
+        .policy-panel {
+          border-radius: 18px;
+          padding: 18px;
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+        }
+
+        .policy-state-ok {
+          background: #ecfdf5;
+          border-color: #bbf7d0;
+        }
+
+        .policy-state-warning {
+          background: #fff7ed;
+          border-color: #fed7aa;
+        }
+
+        .policy-state-blocked {
+          background: #fef2f2;
+          border-color: #fecaca;
+        }
+
+        .policy-summary {
+          font-size: 15px;
+          font-weight: 700;
+          line-height: 1.6;
+          margin-bottom: 16px;
+        }
+
         @media (max-width: 1120px) {
           .routing-grid {
             grid-template-columns: 1fr 1fr;
@@ -968,8 +1075,8 @@ function renderAdminShipmentDetails({
             <span class="badge ${statusClass}">${status}</span>
             <span class="badge badge-neutral">${carrier}</span>
             <span class="badge badge-neutral">Order ID: ${orderId}</span>
-            <span class="badge badge-neutral">Merchant: ${merchantLabel}</span>
-            <span class="badge badge-neutral">Shop: ${shopDomain}</span>
+            <span class="badge badge-neutral">Merchant: ${escapeHtml(enrichedShipment.merchant_id || "default")}</span>
+            <span class="badge badge-neutral">Shop: ${escapeHtml(enrichedShipment.shop_domain || "-")}</span>
           </div>
 
           ${renderSyncBanner(syncState)}
@@ -994,6 +1101,7 @@ function renderAdminShipmentDetails({
 
         <div class="grid">
           ${renderHealthPanel(enrichedShipment)}
+          ${renderMerchantPolicyPanel(enrichedShipment)}
           ${renderRoutingPanel(enrichedShipment)}
           ${renderCheckoutSnapshotPanel(enrichedShipment)}
 
@@ -1018,12 +1126,12 @@ function renderAdminShipmentDetails({
 
               <div class="info-row">
                 <div class="label">Merchant ID</div>
-                <div class="value">${merchantLabel}</div>
+                <div class="value">${escapeHtml(enrichedShipment.merchant_id || "default")}</div>
               </div>
 
               <div class="info-row">
                 <div class="label">Shop domain</div>
-                <div class="value">${shopDomain}</div>
+                <div class="value">${escapeHtml(enrichedShipment.shop_domain || "-")}</div>
               </div>
 
               <div class="info-row">

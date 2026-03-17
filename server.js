@@ -51,7 +51,8 @@ const {
 const {
   getMerchantCarrierMatrix,
   upsertMerchantCarrierSetting,
-  getEnabledRateCarriersForMerchant
+  getEnabledRateCarriersForMerchant,
+  isTrackingCarrierEnabledForMerchant
 } = require("./services/merchantCarrierSettings");
 
 const {
@@ -355,8 +356,55 @@ async function buildShipOneRatePreview(merchantContext = {}) {
   };
 }
 
+function renderTrackingDisabledPage() {
+  return `
+    <!DOCTYPE html>
+    <html lang="sv">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Tracking otillgänglig</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; background: #f8fafc; padding: 40px; color: #0f172a;">
+        <div style="max-width: 720px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 20px; padding: 28px;">
+          <h1 style="margin-top: 0;">Tracking är inte tillgänglig</h1>
+          <p style="line-height: 1.7; color: #475569;">
+            Den här försändelsen finns i ShipOne, men live tracking är inte aktiverad för merchantens aktuella carrier.
+          </p>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+async function isTrackingAllowedForShipment(shipment) {
+  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+
+  if (!actualCarrier) {
+    return false;
+  }
+
+  const merchantId = normalizeMerchantId(shipment?.merchant_id || "default");
+
+  return isTrackingCarrierEnabledForMerchant(merchantId, actualCarrier);
+}
+
 async function getLiveCarrierTrackingForShipment(shipment) {
   const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+
+  const trackingAllowed = await isTrackingAllowedForShipment(shipment);
+
+  if (!trackingAllowed) {
+    return {
+      success: false,
+      skipped: true,
+      reason: "Tracking is disabled for this merchant/carrier",
+      events: [],
+      statusText: shipment?.carrier_status_text || null,
+      eventCount: shipment?.carrier_event_count || 0,
+      latestEventAt: shipment?.carrier_last_event_at || null
+    };
+  }
 
   if (actualCarrier === "postnord") {
     return fetchPostNordTracking(shipment.tracking_number);
@@ -1139,6 +1187,12 @@ app.get("/track/:trackingNumber", async (req, res) => {
     }
 
     const shipment = result.rows[0];
+    const trackingAllowed = await isTrackingAllowedForShipment(shipment);
+
+    if (!trackingAllowed) {
+      return res.status(403).send(renderTrackingDisabledPage());
+    }
+
     const carrierTracking = await getLiveCarrierTrackingForShipment(shipment);
 
     if (!carrierTracking.skipped) {

@@ -164,6 +164,14 @@ function renderSyncBanner(syncState) {
     `;
   }
 
+  if (syncState === "blocked") {
+    return `
+      <div class="sync-banner sync-banner-blocked">
+        Tracking sync är blockerad av merchant-policy för denna carrier.
+      </div>
+    `;
+  }
+
   return "";
 }
 
@@ -522,6 +530,7 @@ function renderAdminShipmentDetails({
   const liveStatusText = carrierTracking?.statusText
     ? escapeHtml(carrierTracking.statusText)
     : escapeHtml(enrichedShipment.carrier_status_text || "-");
+  const trackingBlocked = isTrackingBlockedByMerchant(enrichedShipment);
 
   return `
     <!DOCTYPE html>
@@ -692,6 +701,12 @@ function renderAdminShipmentDetails({
           border: 1px solid #fecaca;
         }
 
+        .sync-banner-blocked {
+          background: #fff7ed;
+          color: #9a3412;
+          border: 1px solid #fed7aa;
+        }
+
         .action-links {
           display: flex;
           flex-wrap: wrap;
@@ -722,6 +737,13 @@ function renderAdminShipmentDetails({
         .action-button.warning {
           background: #f59e0b;
           color: #fff;
+        }
+
+        .action-button.disabled {
+          background: #e5e7eb;
+          color: #6b7280;
+          border: 1px solid #d1d5db;
+          cursor: not-allowed;
         }
 
         .grid {
@@ -1093,9 +1115,25 @@ function renderAdminShipmentDetails({
                 : ""
             }
             <a class="action-button secondary" href="${adminJsonUrl}" target="_blank" rel="noopener noreferrer">Öppna JSON</a>
-            <form method="POST" action="${manualSyncUrl}" style="display:inline;">
-              <button class="action-button warning" type="submit">Synka tracking nu</button>
-            </form>
+
+            ${
+              trackingBlocked
+                ? `
+                  <button
+                    class="action-button disabled"
+                    type="button"
+                    title="Tracking är blockerad av merchant-policy"
+                    disabled
+                  >
+                    Sync spärrad av policy
+                  </button>
+                `
+                : `
+                  <form method="POST" action="${manualSyncUrl}" style="display:inline;">
+                    <button class="action-button warning" type="submit">Synka tracking nu</button>
+                  </form>
+                `
+            }
           </div>
         </div>
 

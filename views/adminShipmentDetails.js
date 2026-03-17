@@ -149,6 +149,28 @@ function buildPolicyState(shipment) {
   };
 }
 
+function buildAdminLinks(shipment) {
+  const merchantId = String(shipment?.merchant_id || "").trim();
+
+  if (!merchantId) {
+    return {
+      merchantUrl: "/admin",
+      blockedUrl: "/admin?policy=blocked",
+      fallbackUrl: "/admin?policy=fallback"
+    };
+  }
+
+  return {
+    merchantUrl: `/admin?merchant=${encodeURIComponent(merchantId)}`,
+    blockedUrl: `/admin?merchant=${encodeURIComponent(
+      merchantId
+    )}&policy=blocked`,
+    fallbackUrl: `/admin?merchant=${encodeURIComponent(
+      merchantId
+    )}&policy=fallback`
+  };
+}
+
 function renderTimeline(events) {
   if (!Array.isArray(events) || events.length === 0) {
     return `
@@ -518,6 +540,30 @@ function renderCheckoutSnapshotPanel(shipment) {
 
       <div class="snapshot-lines-wrap">
         ${shippingLinesHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminLinksPanel(shipment) {
+  const links = buildAdminLinks(shipment);
+
+  return `
+    <div class="card full-width">
+      <h2 class="card-title">Snabbfilter i admin</h2>
+
+      <div class="admin-links-grid">
+        <a class="admin-filter-link" href="${links.merchantUrl}">
+          Visa alla shipments för denna merchant
+        </a>
+
+        <a class="admin-filter-link admin-filter-link-danger" href="${links.blockedUrl}">
+          Visa tracking-blockerade shipments för denna merchant
+        </a>
+
+        <a class="admin-filter-link admin-filter-link-warning" href="${links.fallbackUrl}">
+          Visa fallback-shipments för denna merchant
+        </a>
       </div>
     </div>
   `;
@@ -1101,8 +1147,42 @@ function renderAdminShipmentDetails({
           padding: 14px 16px;
         }
 
+        .admin-links-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 14px;
+        }
+
+        .admin-filter-link {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 64px;
+          padding: 14px 16px;
+          border-radius: 16px;
+          text-align: center;
+          text-decoration: none;
+          font-weight: 800;
+          color: #1d4ed8;
+          background: #eef4ff;
+          border: 1px solid #cfe0ff;
+        }
+
+        .admin-filter-link-warning {
+          background: #fff7ed;
+          border-color: #fed7aa;
+          color: #9a3412;
+        }
+
+        .admin-filter-link-danger {
+          background: #fef2f2;
+          border-color: #fecaca;
+          color: #991b1b;
+        }
+
         @media (max-width: 1120px) {
-          .routing-grid {
+          .routing-grid,
+          .admin-links-grid {
             grid-template-columns: 1fr 1fr;
           }
         }
@@ -1123,7 +1203,8 @@ function renderAdminShipmentDetails({
             gap: 6px;
           }
 
-          .routing-grid {
+          .routing-grid,
+          .admin-links-grid {
             grid-template-columns: 1fr;
           }
         }
@@ -1188,6 +1269,7 @@ function renderAdminShipmentDetails({
         </div>
 
         <div class="grid">
+          ${renderAdminLinksPanel(enrichedShipment)}
           ${renderPolicyPanel(enrichedShipment)}
           ${renderHealthPanel(enrichedShipment)}
           ${renderRoutingPanel(enrichedShipment)}

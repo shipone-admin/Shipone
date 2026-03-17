@@ -1,21 +1,42 @@
 const { query } = require("./db");
-const { syncPostNordTrackingForShipment } = require("./trackingSyncService");
+const { syncPostNordTrackingByOrderId } = require("./trackingSyncService");
 
-function normalizeLimit(limit) {
-  const value = Number(limit);
-  if (!Number.isFinite(value)) return 20;
-  return Math.max(1, Math.min(Math.floor(value), 200));
+function toSafeLimit(value, fallback = 20, max = 200) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.min(Math.floor(parsed), max);
 }
 
-function normalizeMaxAgeDays(maxAgeDays) {
-  const value = Number(maxAgeDays);
-  if (!Number.isFinite(value)) return 30;
-  return Math.max(1, Math.min(Math.floor(value), 365));
+function toSafeMaxAgeDays(value, fallback = 30, max = 365) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.min(Math.floor(parsed), max);
 }
 
-async function getActivePostNordShipments({ limit = 20, maxAgeDays = 30 } = {}) {
-  const safeLimit = normalizeLimit(limit);
-  const safeMaxAgeDays = normalizeMaxAgeDays(maxAgeDays);
+async function loadPostNordShipments(limit, includeDelivered) {
+  if (includeDelivered) {
+    const result = await query(
+      `
+        SELECT *
+        FROM shipments
+        WHERE actual_carrier = 'postnord'
+          AND tracking_number IS NOT NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT $1
+      `,
+      [limit]
+    );
+
+    return result.rows;
+  }
 
   const result = await query(
     `
@@ -23,95 +44,125 @@ async function getActivePostNordShipments({ limit = 20, maxAgeDays = 30 } = {}) 
       FROM shipments
       WHERE actual_carrier = 'postnord'
         AND tracking_number IS NOT NULL
-        AND status != 'failed'
-        AND created_at >= NOW() - ($2::int * INTERVAL '1 day')
+        AND (
+          carrier_status_text IS NULL
+          OR carrier_status_text NOT ILIKE '%delivered%'
+          OR carrier_status_text NOT ILIKE '%utdelad%'
+        )
+      ORDER BY created_at DESC, id DESC
+      LIMIT $1
+    `,
+    [limit]
+  );
+
+  return result.rows;
+}
+
+async function loadActivePostNordShipments(limit, maxAgeDays) {
+  const result = await query(
+    `
+      SELECT *
+      FROM shipments
+      WHERE actual_carrier = 'postnord'
+        AND tracking_number IS NOT NULL
+        AND status = 'completed'
+        AND created_at >= NOW() - ($2::text || ' days')::interval
         AND (
           carrier_next_sync_at IS NULL
           OR carrier_next_sync_at <= NOW()
         )
-      ORDER BY carrier_next_sync_at ASC NULLS FIRST, created_at DESC
+      ORDER BY
+        COALESCE(carrier_next_sync_at, created_at) ASC,
+        id DESC
       LIMIT $1
     `,
-    [safeLimit, safeMaxAgeDays]
+    [limit, String(maxAgeDays)]
   );
 
+  return result.rows;
+}
+
+async function syncPostNordBatch({ limit = 20, includeDelivered = false } = {}) {
+  const safeLimit = toSafeLimit(limit, 20, 200);
+  const shipments = await loadPostNordShipments(
+    safeLimit,
+    Boolean(includeDelivered)
+  );
+
+  const results = [];
+
+  for (const shipment of shipments) {
+    const result = await syncPostNordTrackingByOrderId(shipment.order_id);
+
+    results.push({
+      order_id: shipment.order_id,
+      tracking_number: shipment.tracking_number,
+      merchant_id: shipment.merchant_id || "default",
+      success: Boolean(result.success),
+      statusCode: result.statusCode || 500,
+      error: result.error || null
+    });
+  }
+
+  const successCount = results.filter((item) => item.success).length;
+  const failureCount = results.length - successCount;
+
   return {
-    shipments: result.rows,
-    filters: {
-      actual_carrier: "postnord",
-      failed_excluded: true,
-      tracking_number_required: true,
-      due_for_sync_only: true,
-      maxAgeDays: safeMaxAgeDays,
-      limit: safeLimit
-    }
+    success: failureCount === 0,
+    mode: "batch_postnord",
+    total: results.length,
+    successCount,
+    failureCount,
+    results
   };
 }
 
-async function syncActivePostNordBatch({ limit = 20, maxAgeDays = 30 } = {}) {
-  const safeLimit = normalizeLimit(limit);
-  const safeMaxAgeDays = normalizeMaxAgeDays(maxAgeDays);
+async function syncActivePostNordBatch({
+  limit = 20,
+  maxAgeDays = 30
+} = {}) {
+  const safeLimit = toSafeLimit(limit, 20, 200);
+  const safeMaxAgeDays = toSafeMaxAgeDays(maxAgeDays, 30, 365);
 
-  const { shipments, filters } = await getActivePostNordShipments({
-    limit: safeLimit,
-    maxAgeDays: safeMaxAgeDays
-  });
+  const shipments = await loadActivePostNordShipments(
+    safeLimit,
+    safeMaxAgeDays
+  );
 
-  const summary = {
-    success: true,
-    totalCandidates: shipments.length,
-    synced: 0,
-    failed: 0,
-    skipped: 0,
-    filters,
-    results: []
-  };
+  const results = [];
 
   for (const shipment of shipments) {
-    try {
-      const result = await syncPostNordTrackingForShipment(shipment);
+    const result = await syncPostNordTrackingByOrderId(shipment.order_id);
 
-      if (result.success) {
-        summary.synced++;
-      } else if (result.statusCode === 400 || result.statusCode === 404) {
-        summary.skipped++;
-      } else {
-        summary.failed++;
-      }
-
-      summary.results.push({
-        success: result.success,
-        statusCode: result.statusCode,
-        order_id: shipment.order_id,
-        order_name: shipment.order_name,
-        tracking_number: shipment.tracking_number,
-        actual_carrier: shipment.actual_carrier,
-        carrier_status_text: result.shipment?.carrier_status_text || null,
-        carrier_last_event_at: result.shipment?.carrier_last_event_at || null,
-        carrier_event_count: result.shipment?.carrier_event_count || 0,
-        carrier_last_synced_at: result.shipment?.carrier_last_synced_at || null,
-        carrier_next_sync_at: result.shipment?.carrier_next_sync_at || null,
-        carrier_last_sync_status: result.shipment?.carrier_last_sync_status || null,
-        error: result.error || null
-      });
-    } catch (error) {
-      summary.failed++;
-
-      summary.results.push({
-        success: false,
-        statusCode: 500,
-        order_id: shipment.order_id,
-        order_name: shipment.order_name,
-        tracking_number: shipment.tracking_number,
-        actual_carrier: shipment.actual_carrier,
-        error: error.message
-      });
-    }
+    results.push({
+      order_id: shipment.order_id,
+      tracking_number: shipment.tracking_number,
+      merchant_id: shipment.merchant_id || "default",
+      success: Boolean(result.success),
+      statusCode: result.statusCode || 500,
+      error: result.error || null
+    });
   }
 
-  return summary;
+  const successCount = results.filter((item) => item.success).length;
+  const failureCount = results.length - successCount;
+  const skippedByMerchantCount = results.filter(
+    (item) => item.statusCode === 403
+  ).length;
+
+  return {
+    success: failureCount === 0,
+    mode: "active_postnord",
+    total: results.length,
+    successCount,
+    failureCount,
+    skippedByMerchantCount,
+    maxAgeDays: safeMaxAgeDays,
+    results
+  };
 }
 
 module.exports = {
+  syncPostNordBatch,
   syncActivePostNordBatch
 };

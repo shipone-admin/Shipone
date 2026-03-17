@@ -1,7 +1,6 @@
 const fetch = require("node-fetch");
+const { resolveShopifyStoreCredentials } = require("./merchantStore");
 
-const SHOP = process.env.SHOPIFY_STORE_URL;
-const TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const API_VERSION = "2024-10";
 
 function sleep(ms) {
@@ -68,7 +67,13 @@ function getErrorMessage(parsed, fallbackMessage) {
   return fallbackMessage;
 }
 
-async function createFulfillmentWithRetry(fulfillmentOrderId, trackingNumber, trackingUrl) {
+async function createFulfillmentWithRetry({
+  shop,
+  token,
+  fulfillmentOrderId,
+  trackingNumber,
+  trackingUrl
+}) {
   const maxAttempts = 3;
   let lastParsed = null;
   let lastStatus = null;
@@ -77,11 +82,11 @@ async function createFulfillmentWithRetry(fulfillmentOrderId, trackingNumber, tr
     console.log(`📡 Shopify fulfillment create attempt ${attempt}/${maxAttempts}`);
 
     const fulfillmentRes = await fetch(
-      `https://${SHOP}/admin/api/${API_VERSION}/fulfillments.json`,
+      `https://${shop}/admin/api/${API_VERSION}/fulfillments.json`,
       {
         method: "POST",
         headers: {
-          "X-Shopify-Access-Token": TOKEN,
+          "X-Shopify-Access-Token": token,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -152,15 +157,35 @@ async function createFulfillmentWithRetry(fulfillmentOrderId, trackingNumber, tr
   };
 }
 
-async function fulfillShopifyOrder(orderId, trackingNumber, trackingUrl) {
+async function fulfillShopifyOrder(
+  orderId,
+  trackingNumber,
+  trackingUrl,
+  merchantContext = {}
+) {
   try {
     console.log("📦 Starting Shopify fulfillment for order:", orderId);
 
-    if (!SHOP || !TOKEN) {
+    const credentials = await resolveShopifyStoreCredentials({
+      shopDomain: merchantContext.shop_domain,
+      merchantId: merchantContext.merchant_id
+    });
+
+    const shop = credentials.shop_domain;
+    const token = credentials.access_token;
+
+    console.log("🏪 Shopify fulfillment credential source:", credentials.source);
+    console.log("🏪 Shopify fulfillment shop:", shop || "missing");
+    console.log(
+      "🏪 Shopify fulfillment merchant:",
+      credentials.merchant_id || merchantContext.merchant_id || "default"
+    );
+
+    if (!shop || !token) {
       return {
         success: false,
         step: "config",
-        error: "Missing SHOPIFY_STORE_URL or SHOPIFY_ACCESS_TOKEN"
+        error: "Missing Shopify store credentials for this merchant/store"
       };
     }
 
@@ -181,11 +206,11 @@ async function fulfillShopifyOrder(orderId, trackingNumber, trackingUrl) {
     }
 
     const fulfillmentOrdersRes = await fetch(
-      `https://${SHOP}/admin/api/${API_VERSION}/orders/${orderId}/fulfillment_orders.json`,
+      `https://${shop}/admin/api/${API_VERSION}/orders/${orderId}/fulfillment_orders.json`,
       {
         method: "GET",
         headers: {
-          "X-Shopify-Access-Token": TOKEN,
+          "X-Shopify-Access-Token": token,
           "Content-Type": "application/json"
         }
       }
@@ -234,11 +259,13 @@ async function fulfillShopifyOrder(orderId, trackingNumber, trackingUrl) {
 
     console.log("✅ Fulfillment order found:", fulfillmentOrderId);
 
-    return await createFulfillmentWithRetry(
+    return await createFulfillmentWithRetry({
+      shop,
+      token,
       fulfillmentOrderId,
       trackingNumber,
       trackingUrl
-    );
+    });
   } catch (error) {
     return {
       success: false,

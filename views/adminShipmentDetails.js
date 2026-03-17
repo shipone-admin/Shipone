@@ -105,72 +105,6 @@ function getEventSourceLabel(source) {
   return "ShipOne";
 }
 
-function isMerchantTrackingBlocked(shipment) {
-  const syncStatus = String(
-    shipment?.carrier_last_sync_status || ""
-  ).toLowerCase();
-
-  return syncStatus === "disabled_by_merchant" || syncStatus === "disabled";
-}
-
-function buildPolicyState(shipment) {
-  const selectedCarrier = String(shipment?.selected_carrier || "").toLowerCase();
-  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
-  const fallbackUsed = Boolean(shipment?.fallback_used);
-  const trackingBlocked = isMerchantTrackingBlocked(shipment);
-
-  if (trackingBlocked) {
-    return {
-      code: "blocked",
-      label: "Tracking blockerad",
-      className: "policy-pill-blocked",
-      summary: `Live tracking är blockerad av merchant-policy för ${formatCarrierName(
-        actualCarrier
-      )}.`
-    };
-  }
-
-  if (fallbackUsed && selectedCarrier && actualCarrier && selectedCarrier !== actualCarrier) {
-    return {
-      code: "fallback",
-      label: "Fallback använd",
-      className: "policy-pill-warning",
-      summary: `Shipmentet gick vidare med fallback från ${formatCarrierName(
-        selectedCarrier
-      )} till ${formatCarrierName(actualCarrier)}.`
-    };
-  }
-
-  return {
-    code: "ok",
-    label: "Policy OK",
-    className: "policy-pill-ok",
-    summary: "Ingen merchant-policy blockerar tracking eller routing för detta shipment."
-  };
-}
-
-function buildAdminLinks(shipment) {
-  const merchantId = String(shipment?.merchant_id || "").trim();
-
-  if (!merchantId) {
-    return {
-      merchantUrl: "/admin",
-      blockedUrl: "/admin?policy=blocked",
-      fallbackUrl: "/admin?policy=fallback"
-    };
-  }
-
-  return {
-    merchantUrl: `/admin?merchant=${encodeURIComponent(merchantId)}`,
-    blockedUrl: `/admin?merchant=${encodeURIComponent(
-      merchantId
-    )}&policy=blocked`,
-    fallbackUrl: `/admin?merchant=${encodeURIComponent(
-      merchantId
-    )}&policy=fallback`
-  };
-}
-
 function renderTimeline(events) {
   if (!Array.isArray(events) || events.length === 0) {
     return `
@@ -225,7 +159,7 @@ function renderSyncBanner(syncState) {
   if (syncState === "blocked") {
     return `
       <div class="sync-banner sync-banner-warning">
-        Sync stoppades eftersom tracking är blockerad av merchant-policy för aktuell carrier.
+        Sync är blockerad av merchant-policy för denna carrier.
       </div>
     `;
   }
@@ -280,71 +214,66 @@ function getOrderSnapshot(shipment) {
   return shipment?.shipment_result?.order_snapshot || null;
 }
 
-function renderPolicyPanel(shipment) {
-  const policy = buildPolicyState(shipment);
-  const selectedCarrier = formatCarrierName(shipment?.selected_carrier);
-  const actualCarrier = formatCarrierName(shipment?.actual_carrier);
-  const merchantId = shipment?.merchant_id || "default";
-  const shopDomain = shipment?.shop_domain || "-";
-  const shipmentAllowed = "Ja";
-  const trackingAllowed = isMerchantTrackingBlocked(shipment) ? "Nej" : "Ja";
+function isTrackingBlockedByPolicy(shipment) {
+  const lastSyncStatus = String(
+    shipment?.carrier_last_sync_status || ""
+  ).toLowerCase();
+
+  return lastSyncStatus === "disabled_by_merchant" || lastSyncStatus === "disabled";
+}
+
+function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {
+  const merchantId = escapeHtml(shipment?.merchant_id || "default");
+  const shopDomain = escapeHtml(shipment?.shop_domain || "-");
+
+  const baseAdminUrl = `/admin?merchant=${encodeURIComponent(
+    shipment?.merchant_id || "default"
+  )}`;
 
   return `
     <div class="card full-width">
-      <h2 class="card-title">Merchant policy</h2>
+      <h2 class="card-title">Merchant overview</h2>
 
-      <div class="policy-panel">
-        <div class="policy-top">
-          <span class="policy-pill ${escapeHtml(policy.className)}">
-            ${escapeHtml(policy.label)}
-          </span>
+      <div class="info-list" style="margin-bottom: 18px;">
+        <div class="info-row">
+          <div class="label">Merchant ID</div>
+          <div class="value">${merchantId}</div>
         </div>
 
-        <div class="policy-summary">
-          ${escapeHtml(policy.summary)}
+        <div class="info-row">
+          <div class="label">Shop domain</div>
+          <div class="value">${shopDomain}</div>
         </div>
+      </div>
 
-        <div class="info-list">
-          <div class="info-row">
-            <div class="label">Merchant ID</div>
-            <div class="value">${escapeHtml(merchantId)}</div>
-          </div>
+      <div class="merchant-overview-grid">
+        <a class="merchant-stat-card" href="${baseAdminUrl}">
+          <div class="merchant-stat-label">Alla shipments</div>
+          <div class="merchant-stat-value">${escapeHtml(
+            String(merchantOverview.total_shipments ?? 0)
+          )}</div>
+        </a>
 
-          <div class="info-row">
-            <div class="label">Shop domain</div>
-            <div class="value">${escapeHtml(shopDomain)}</div>
-          </div>
+        <a class="merchant-stat-card merchant-stat-card-warning" href="${baseAdminUrl}&policy=fallback">
+          <div class="merchant-stat-label">Fallback</div>
+          <div class="merchant-stat-value">${escapeHtml(
+            String(merchantOverview.fallback_shipments ?? 0)
+          )}</div>
+        </a>
 
-          <div class="info-row">
-            <div class="label">Vald carrier</div>
-            <div class="value">${escapeHtml(selectedCarrier)}</div>
-          </div>
+        <a class="merchant-stat-card merchant-stat-card-danger" href="${baseAdminUrl}&policy=blocked">
+          <div class="merchant-stat-label">Tracking blockerade</div>
+          <div class="merchant-stat-value">${escapeHtml(
+            String(merchantOverview.blocked_tracking_shipments ?? 0)
+          )}</div>
+        </a>
 
-          <div class="info-row">
-            <div class="label">Faktisk carrier</div>
-            <div class="value">${escapeHtml(actualCarrier)}</div>
-          </div>
-
-          <div class="info-row">
-            <div class="label">Fallback använd</div>
-            <div class="value">${shipment?.fallback_used ? "Ja" : "Nej"}</div>
-          </div>
-
-          <div class="info-row">
-            <div class="label">Shipment tillåtet</div>
-            <div class="value">${shipmentAllowed}</div>
-          </div>
-
-          <div class="info-row">
-            <div class="label">Tracking tillåten</div>
-            <div class="value">${trackingAllowed}</div>
-          </div>
-
-          <div class="info-row">
-            <div class="label">Senaste sync-status</div>
-            <div class="value">${escapeHtml(shipment?.carrier_last_sync_status || "-")}</div>
-          </div>
-        </div>
+        <a class="merchant-stat-card merchant-stat-card-success" href="${baseAdminUrl}&policy=ok">
+          <div class="merchant-stat-label">Policy OK</div>
+          <div class="merchant-stat-value">${escapeHtml(
+            String(merchantOverview.policy_ok_shipments ?? 0)
+          )}</div>
+        </a>
       </div>
     </div>
   `;
@@ -443,6 +372,71 @@ function renderRoutingPanel(shipment) {
   `;
 }
 
+function renderPolicyPanel(shipment) {
+  const trackingBlocked = isTrackingBlockedByPolicy(shipment);
+
+  return `
+    <div class="card full-width">
+      <h2 class="card-title">Merchant policy</h2>
+
+      <div class="info-list">
+        <div class="info-row">
+          <div class="label">Live tracking</div>
+          <div class="value">
+            ${
+              trackingBlocked
+                ? "Live tracking är blockerad av merchant-policy för " +
+                  escapeHtml(formatCarrierName(shipment.actual_carrier || "-")) +
+                  "."
+                : "Ingen aktiv tracking-blockering syns för denna carrier."
+            }
+          </div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Merchant ID</div>
+          <div class="value">${escapeHtml(shipment.merchant_id || "default")}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Shop domain</div>
+          <div class="value">${escapeHtml(shipment.shop_domain || "-")}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Vald carrier</div>
+          <div class="value">${escapeHtml(formatCarrierName(shipment.selected_carrier || "-"))}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Faktisk carrier</div>
+          <div class="value">${escapeHtml(formatCarrierName(shipment.actual_carrier || "-"))}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Fallback använd</div>
+          <div class="value">${shipment.fallback_used ? "Ja" : "Nej"}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Shipment tillåtet</div>
+          <div class="value">Ja</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Tracking tillåten</div>
+          <div class="value">${trackingBlocked ? "Nej" : "Ja"}</div>
+        </div>
+
+        <div class="info-row">
+          <div class="label">Senaste sync-status</div>
+          <div class="value">${escapeHtml(shipment.carrier_last_sync_status || "-")}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderCheckoutSnapshotPanel(shipment) {
   const orderSnapshot = getOrderSnapshot(shipment);
   const routingSnapshot = getRoutingSnapshot(shipment);
@@ -488,13 +482,19 @@ function renderCheckoutSnapshotPanel(shipment) {
       <h2 class="card-title">Checkout & webhook snapshot</h2>
 
       <div class="info-list">
-        <div class="info-row">
-          <div class="label">Merchant snapshot</div>
-          <div class="value">
-            Merchant: ${escapeHtml(merchantSnapshot?.merchant_id || shipment?.merchant_id || "-")}<br />
-            Shop domain: ${escapeHtml(merchantSnapshot?.shop_domain || shipment?.shop_domain || "-")}
-          </div>
-        </div>
+        ${
+          merchantSnapshot
+            ? `
+              <div class="info-row">
+                <div class="label">Merchant snapshot</div>
+                <div class="value">
+                  Merchant: ${escapeHtml(merchantSnapshot.merchant_id || "-")}<br />
+                  Shop domain: ${escapeHtml(merchantSnapshot.shop_domain || "-")}
+                </div>
+              </div>
+            `
+            : ""
+        }
 
         <div class="info-row">
           <div class="label">Cart-val från kund</div>
@@ -545,38 +545,14 @@ function renderCheckoutSnapshotPanel(shipment) {
   `;
 }
 
-function renderAdminLinksPanel(shipment) {
-  const links = buildAdminLinks(shipment);
-
-  return `
-    <div class="card full-width">
-      <h2 class="card-title">Snabbfilter i admin</h2>
-
-      <div class="admin-links-grid">
-        <a class="admin-filter-link" href="${links.merchantUrl}">
-          Visa alla shipments för denna merchant
-        </a>
-
-        <a class="admin-filter-link admin-filter-link-danger" href="${links.blockedUrl}">
-          Visa tracking-blockerade shipments för denna merchant
-        </a>
-
-        <a class="admin-filter-link admin-filter-link-warning" href="${links.fallbackUrl}">
-          Visa fallback-shipments för denna merchant
-        </a>
-      </div>
-    </div>
-  `;
-}
-
 function renderAdminShipmentDetails({
   shipment,
   events = [],
   carrierTracking = null,
-  syncState = ""
+  syncState = "",
+  merchantOverview = {}
 }) {
   const enrichedShipment = enrichShipmentWithHealth(shipment);
-  const policy = buildPolicyState(enrichedShipment);
 
   const orderId = escapeHtml(enrichedShipment.order_id || "-");
   const orderName = escapeHtml(enrichedShipment.order_name || "-");
@@ -597,7 +573,7 @@ function renderAdminShipmentDetails({
   const liveStatusText = carrierTracking?.statusText
     ? escapeHtml(carrierTracking.statusText)
     : escapeHtml(enrichedShipment.carrier_status_text || "-");
-  const trackingBlocked = isMerchantTrackingBlocked(enrichedShipment);
+  const trackingBlocked = isTrackingBlockedByPolicy(enrichedShipment);
 
   return `
     <!DOCTYPE html>
@@ -746,55 +722,6 @@ function renderAdminShipmentDetails({
         .badge-neutral {
           background: var(--neutral-bg);
           color: var(--neutral-text);
-        }
-
-        .policy-hero {
-          margin-top: 18px;
-          padding: 16px 18px;
-          border-radius: 18px;
-          border: 1px solid #e2e8f0;
-          background: #f8fafc;
-        }
-
-        .policy-hero-top {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          flex-wrap: wrap;
-          margin-bottom: 8px;
-        }
-
-        .policy-pill {
-          display: inline-flex;
-          align-items: center;
-          border-radius: 999px;
-          padding: 10px 14px;
-          font-size: 13px;
-          font-weight: 800;
-        }
-
-        .policy-pill-ok {
-          background: #ecfdf5;
-          color: #065f46;
-          border: 1px solid #bbf7d0;
-        }
-
-        .policy-pill-warning {
-          background: #fff7ed;
-          color: #9a3412;
-          border: 1px solid #fed7aa;
-        }
-
-        .policy-pill-blocked {
-          background: #fef2f2;
-          color: #991b1b;
-          border: 1px solid #fecaca;
-        }
-
-        .policy-hero-text {
-          font-size: 14px;
-          line-height: 1.6;
-          color: var(--text);
         }
 
         .sync-banner {
@@ -968,6 +895,57 @@ function renderAdminShipmentDetails({
           color: var(--muted);
         }
 
+        .merchant-overview-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 14px;
+        }
+
+        .merchant-stat-card {
+          display: block;
+          text-decoration: none;
+          border: 1px solid #dbeafe;
+          background: #f8fbff;
+          border-radius: 18px;
+          padding: 16px;
+          color: var(--text);
+        }
+
+        .merchant-stat-card:hover {
+          border-color: #93c5fd;
+          transform: translateY(-1px);
+        }
+
+        .merchant-stat-card-success {
+          background: #ecfdf5;
+          border-color: #bbf7d0;
+        }
+
+        .merchant-stat-card-warning {
+          background: #fff7ed;
+          border-color: #fed7aa;
+        }
+
+        .merchant-stat-card-danger {
+          background: #fef2f2;
+          border-color: #fecaca;
+        }
+
+        .merchant-stat-label {
+          font-size: 12px;
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 700;
+          margin-bottom: 8px;
+        }
+
+        .merchant-stat-value {
+          font-size: 30px;
+          font-weight: 800;
+          line-height: 1;
+        }
+
         .snapshot-lines-wrap {
           display: grid;
           gap: 12px;
@@ -1089,14 +1067,12 @@ function renderAdminShipmentDetails({
           line-height: 1.6;
         }
 
-        .health-panel,
-        .policy-panel {
+        .health-panel {
           display: grid;
           gap: 16px;
         }
 
-        .health-top,
-        .policy-top {
+        .health-top {
           display: flex;
           flex-wrap: wrap;
           gap: 12px;
@@ -1137,52 +1113,9 @@ function renderAdminShipmentDetails({
           color: var(--neutral-text);
         }
 
-        .policy-summary {
-          font-size: 14px;
-          line-height: 1.6;
-          color: var(--text);
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          padding: 14px 16px;
-        }
-
-        .admin-links-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 14px;
-        }
-
-        .admin-filter-link {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 64px;
-          padding: 14px 16px;
-          border-radius: 16px;
-          text-align: center;
-          text-decoration: none;
-          font-weight: 800;
-          color: #1d4ed8;
-          background: #eef4ff;
-          border: 1px solid #cfe0ff;
-        }
-
-        .admin-filter-link-warning {
-          background: #fff7ed;
-          border-color: #fed7aa;
-          color: #9a3412;
-        }
-
-        .admin-filter-link-danger {
-          background: #fef2f2;
-          border-color: #fecaca;
-          color: #991b1b;
-        }
-
         @media (max-width: 1120px) {
           .routing-grid,
-          .admin-links-grid {
+          .merchant-overview-grid {
             grid-template-columns: 1fr 1fr;
           }
         }
@@ -1204,7 +1137,7 @@ function renderAdminShipmentDetails({
           }
 
           .routing-grid,
-          .admin-links-grid {
+          .merchant-overview-grid {
             grid-template-columns: 1fr;
           }
         }
@@ -1231,24 +1164,23 @@ function renderAdminShipmentDetails({
             <span class="badge ${statusClass}">${status}</span>
             <span class="badge badge-neutral">${carrier}</span>
             <span class="badge badge-neutral">Order ID: ${orderId}</span>
-          </div>
-
-          <div class="policy-hero">
-            <div class="policy-hero-top">
-              <span class="policy-pill ${escapeHtml(policy.className)}">${escapeHtml(policy.label)}</span>
-            </div>
-            <div class="policy-hero-text">
-              ${escapeHtml(policy.summary)}
-            </div>
+            <span class="badge badge-neutral">Merchant: ${escapeHtml(
+              enrichedShipment.merchant_id || "default"
+            )}</span>
+            <span class="badge badge-neutral">Shop: ${escapeHtml(
+              enrichedShipment.shop_domain || "-"
+            )}</span>
           </div>
 
           ${renderSyncBanner(syncState)}
 
           <div class="action-links">
             ${
-              trackingPageUrl
-                ? `<a class="action-button" href="${trackingPageUrl}" target="_blank" rel="noopener noreferrer">Öppna publik tracking</a>`
-                : ""
+              trackingBlocked
+                ? `<button class="action-button disabled" type="button" disabled>Publik tracking spärrad</button>`
+                : trackingPageUrl
+                  ? `<a class="action-button" href="${trackingPageUrl}" target="_blank" rel="noopener noreferrer">Öppna publik tracking</a>`
+                  : ""
             }
             ${
               trackingUrl
@@ -1258,20 +1190,18 @@ function renderAdminShipmentDetails({
             <a class="action-button secondary" href="${adminJsonUrl}" target="_blank" rel="noopener noreferrer">Öppna JSON</a>
             ${
               trackingBlocked
-                ? `<button class="action-button disabled" type="button" disabled title="Tracking är blockerad av merchant-policy">Sync spärrad av policy</button>`
-                : `
-                  <form method="POST" action="${manualSyncUrl}" style="display:inline;">
+                ? `<button class="action-button disabled" type="button" disabled>Sync spärrad</button>`
+                : `<form method="POST" action="${manualSyncUrl}" style="display:inline;">
                     <button class="action-button warning" type="submit">Synka tracking nu</button>
-                  </form>
-                `
+                  </form>`
             }
           </div>
         </div>
 
         <div class="grid">
-          ${renderAdminLinksPanel(enrichedShipment)}
-          ${renderPolicyPanel(enrichedShipment)}
+          ${renderMerchantOverviewPanel(enrichedShipment, merchantOverview)}
           ${renderHealthPanel(enrichedShipment)}
+          ${renderPolicyPanel(enrichedShipment)}
           ${renderRoutingPanel(enrichedShipment)}
           ${renderCheckoutSnapshotPanel(enrichedShipment)}
 
@@ -1296,7 +1226,7 @@ function renderAdminShipmentDetails({
 
               <div class="info-row">
                 <div class="label">Merchant ID</div>
-                <div class="value">${escapeHtml(enrichedShipment.merchant_id || "-")}</div>
+                <div class="value">${escapeHtml(enrichedShipment.merchant_id || "default")}</div>
               </div>
 
               <div class="info-row">

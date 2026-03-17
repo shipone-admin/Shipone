@@ -134,6 +134,13 @@ function matchesHealthFilter(shipment, healthFilter) {
   return String(shipment?.health || "").toLowerCase() === normalizedFilter;
 }
 
+function isMerchantTrackingBlocked(shipment) {
+  return (
+    String(shipment?.carrier_last_sync_status || "").toLowerCase() ===
+    "disabled_by_merchant"
+  );
+}
+
 function buildStats(shipments) {
   const list = Array.isArray(shipments) ? shipments : [];
 
@@ -146,21 +153,18 @@ function buildStats(shipments) {
   ).length;
   const problems = list.filter((shipment) => shipment.health === "problem").length;
   const waitingForNextSync = list.filter((shipment) => hasUpcomingSync(shipment)).length;
+  const blockedTrackingCount = list.filter((shipment) =>
+    isMerchantTrackingBlocked(shipment)
+  ).length;
 
   return {
     total,
     merchantCount,
     completed,
     problems,
-    waitingForNextSync
+    waitingForNextSync,
+    blockedTrackingCount
   };
-}
-
-function isMerchantTrackingBlocked(shipment) {
-  return (
-    String(shipment?.carrier_last_sync_status || "").toLowerCase() ===
-    "disabled_by_merchant"
-  );
 }
 
 function buildPolicySummary(shipment) {
@@ -629,7 +633,7 @@ function renderAdminDashboard({
 
         .stats {
           display: grid;
-          grid-template-columns: repeat(5, minmax(0, 1fr));
+          grid-template-columns: repeat(6, minmax(0, 1fr));
           gap: 16px;
           margin-top: 24px;
         }
@@ -655,6 +659,11 @@ function renderAdminDashboard({
         .stat-card.waiting {
           border-color: #d7e6ff;
           background: linear-gradient(180deg, #fbfdff 0%, #f4f9ff 100%);
+        }
+
+        .stat-card.blocked {
+          border-color: #fed7aa;
+          background: linear-gradient(180deg, #fffaf5 0%, #fff7ed 100%);
         }
 
         .stat-label {
@@ -1249,6 +1258,11 @@ function renderAdminDashboard({
             <div class="stat-card waiting">
               <div class="stat-label">Väntar på nästa sync</div>
               <div class="stat-value">${stats.waitingForNextSync}</div>
+            </div>
+
+            <div class="stat-card blocked">
+              <div class="stat-label">Tracking blockerade</div>
+              <div class="stat-value">${stats.blockedTrackingCount}</div>
             </div>
           </div>
         </div>

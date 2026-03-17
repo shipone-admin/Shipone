@@ -46,8 +46,10 @@ async function loadPostNordShipments(limit, includeDelivered) {
         AND tracking_number IS NOT NULL
         AND (
           carrier_status_text IS NULL
-          OR carrier_status_text NOT ILIKE '%delivered%'
-          OR carrier_status_text NOT ILIKE '%utdelad%'
+          OR (
+            carrier_status_text NOT ILIKE '%delivered%'
+            AND carrier_status_text NOT ILIKE '%utdelad%'
+          )
         )
       ORDER BY created_at DESC, id DESC
       LIMIT $1
@@ -82,6 +84,42 @@ async function loadActivePostNordShipments(limit, maxAgeDays) {
   return result.rows;
 }
 
+function buildBatchResultItem(shipment, result) {
+  return {
+    order_id: shipment.order_id,
+    tracking_number: shipment.tracking_number,
+    merchant_id: shipment.merchant_id || "default",
+    success: Boolean(result.success),
+    skipped: Boolean(result.skipped),
+    skipReason: result.skipReason || null,
+    statusCode: result.statusCode || 500,
+    error: result.error || null
+  };
+}
+
+function buildBatchSummary(mode, results, extra = {}) {
+  const successCount = results.filter((item) => item.success).length;
+  const skippedCount = results.filter((item) => item.skipped).length;
+  const skippedByMerchantCount = results.filter(
+    (item) => item.skipReason === "disabled_by_merchant"
+  ).length;
+  const failureCount = results.filter(
+    (item) => !item.success && !item.skipped
+  ).length;
+
+  return {
+    success: failureCount === 0,
+    mode,
+    total: results.length,
+    successCount,
+    skippedCount,
+    skippedByMerchantCount,
+    failureCount,
+    results,
+    ...extra
+  };
+}
+
 async function syncPostNordBatch({ limit = 20, includeDelivered = false } = {}) {
   const safeLimit = toSafeLimit(limit, 20, 200);
   const shipments = await loadPostNordShipments(
@@ -94,27 +132,12 @@ async function syncPostNordBatch({ limit = 20, includeDelivered = false } = {}) 
   for (const shipment of shipments) {
     const result = await syncPostNordTrackingByOrderId(shipment.order_id);
 
-    results.push({
-      order_id: shipment.order_id,
-      tracking_number: shipment.tracking_number,
-      merchant_id: shipment.merchant_id || "default",
-      success: Boolean(result.success),
-      statusCode: result.statusCode || 500,
-      error: result.error || null
-    });
+    results.push(buildBatchResultItem(shipment, result));
   }
 
-  const successCount = results.filter((item) => item.success).length;
-  const failureCount = results.length - successCount;
-
-  return {
-    success: failureCount === 0,
-    mode: "batch_postnord",
-    total: results.length,
-    successCount,
-    failureCount,
-    results
-  };
+  return buildBatchSummary("batch_postnord", results, {
+    includeDelivered: Boolean(includeDelivered)
+  });
 }
 
 async function syncActivePostNordBatch({
@@ -134,32 +157,12 @@ async function syncActivePostNordBatch({
   for (const shipment of shipments) {
     const result = await syncPostNordTrackingByOrderId(shipment.order_id);
 
-    results.push({
-      order_id: shipment.order_id,
-      tracking_number: shipment.tracking_number,
-      merchant_id: shipment.merchant_id || "default",
-      success: Boolean(result.success),
-      statusCode: result.statusCode || 500,
-      error: result.error || null
-    });
+    results.push(buildBatchResultItem(shipment, result));
   }
 
-  const successCount = results.filter((item) => item.success).length;
-  const failureCount = results.length - successCount;
-  const skippedByMerchantCount = results.filter(
-    (item) => item.statusCode === 403
-  ).length;
-
-  return {
-    success: failureCount === 0,
-    mode: "active_postnord",
-    total: results.length,
-    successCount,
-    failureCount,
-    skippedByMerchantCount,
-    maxAgeDays: safeMaxAgeDays,
-    results
-  };
+  return buildBatchSummary("active_postnord", results, {
+    maxAgeDays: safeMaxAgeDays
+  });
 }
 
 module.exports = {

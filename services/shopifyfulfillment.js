@@ -1,5 +1,5 @@
 const fetch = require("node-fetch");
-const { resolveShopifyStoreCredentials } = require("./merchantStore");
+const { getShopifyCredentialsByShopDomain } = require("./shopifyStoreCredentials");
 
 const API_VERSION = "2024-10";
 
@@ -38,50 +38,30 @@ function isRetryableStatus(status) {
 }
 
 function getErrorMessage(parsed, fallbackMessage) {
-  if (!parsed) {
-    return fallbackMessage;
-  }
+  if (!parsed) return fallbackMessage;
 
   if (parsed.type === "json") {
     const data = parsed.data;
-
     if (data?.errors) {
-      if (typeof data.errors === "string") {
-        return data.errors;
-      }
-
-      return JSON.stringify(data.errors);
+      return typeof data.errors === "string"
+        ? data.errors
+        : JSON.stringify(data.errors);
     }
-
-    if (data?.error) {
-      return data.error;
-    }
-
-    return fallbackMessage;
+    if (data?.error) return data.error;
   }
 
-  if (parsed.type === "text") {
-    return parsed.data || fallbackMessage;
-  }
+  if (parsed.type === "text") return parsed.data || fallbackMessage;
 
   return fallbackMessage;
 }
 
-async function createFulfillmentWithRetry({
-  shop,
-  token,
-  fulfillmentOrderId,
-  trackingNumber,
-  trackingUrl
-}) {
+async function createFulfillmentWithRetry(shop, token, fulfillmentOrderId, trackingNumber, trackingUrl) {
   const maxAttempts = 3;
-  let lastParsed = null;
-  let lastStatus = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     console.log(`📡 Shopify fulfillment create attempt ${attempt}/${maxAttempts}`);
 
-    const fulfillmentRes = await fetch(
+    const res = await fetch(
       `https://${shop}/admin/api/${API_VERSION}/fulfillments.json`,
       {
         method: "POST",
@@ -97,179 +77,109 @@ async function createFulfillmentWithRetry({
               url: trackingUrl
             },
             line_items_by_fulfillment_order: [
-              {
-                fulfillment_order_id: fulfillmentOrderId
-              }
+              { fulfillment_order_id: fulfillmentOrderId }
             ]
           }
         })
       }
     );
 
-    const parsed = await parseResponse(fulfillmentRes);
+    const parsed = await parseResponse(res);
 
-    lastParsed = parsed;
-    lastStatus = fulfillmentRes.status;
+    console.log("📡 Shopify fulfillment create status:", res.status);
 
-    console.log("📡 Shopify fulfillment create status:", fulfillmentRes.status);
-    console.log("📡 Shopify fulfillment create response:");
-    console.log(
-      parsed.type === "json"
-        ? JSON.stringify(parsed.data, null, 2)
-        : parsed.data
-    );
-
-    if (fulfillmentRes.ok) {
+    if (res.ok) {
       return {
         success: true,
-        step: "done",
-        status: fulfillmentRes.status,
-        fulfillmentOrderId,
+        status: res.status,
         data: parsed.data,
         attempts: attempt
       };
     }
 
-    if (!isRetryableStatus(fulfillmentRes.status)) {
+    if (!isRetryableStatus(res.status)) {
       return {
         success: false,
-        step: "create_fulfillment",
-        status: fulfillmentRes.status,
         error: getErrorMessage(parsed, "Failed to create fulfillment"),
-        raw: parsed.data,
-        attempts: attempt
+        status: res.status
       };
     }
 
-    if (attempt < maxAttempts) {
-      console.log(`⏳ Retry after temporary Shopify error ${fulfillmentRes.status}`);
-      await sleep(1200 * attempt);
-    }
+    await sleep(1000 * attempt);
   }
 
   return {
     success: false,
-    step: "create_fulfillment",
-    status: lastStatus,
-    error: getErrorMessage(lastParsed, "Failed to create fulfillment after retries"),
-    raw: lastParsed?.data || null,
-    attempts: maxAttempts
+    error: "Failed after retries"
   };
 }
 
-async function fulfillShopifyOrder(
-  orderId,
-  trackingNumber,
-  trackingUrl,
-  merchantContext = {}
-) {
+async function fulfillShopifyOrder(orderId, trackingNumber, trackingUrl, merchantContext = {}) {
   try {
-    console.log("📦 Starting Shopify fulfillment for order:", orderId);
+    const shopDomain = merchantContext.shop_domain;
 
-    const credentials = await resolveShopifyStoreCredentials({
-      shopDomain: merchantContext.shop_domain,
-      merchantId: merchantContext.merchant_id
-    });
+    // 🔥 Hämta credentials från DB
+    const creds = await getShopifyCredentialsByShopDomain(shopDomain);
 
-    const shop = credentials.shop_domain;
-    const token = credentials.access_token;
+    let SHOP = process.env.SHOPIFY_STORE_URL;
+    let TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
-    console.log("🏪 Shopify fulfillment credential source:", credentials.source);
-    console.log("🏪 Shopify fulfillment shop:", shop || "missing");
-    console.log(
-      "🏪 Shopify fulfillment merchant:",
-      credentials.merchant_id || merchantContext.merchant_id || "default"
-    );
-
-    if (!shop || !token) {
-      return {
-        success: false,
-        step: "config",
-        error: "Missing Shopify store credentials for this merchant/store"
-      };
+    if (creds && creds.access_token && creds.is_active) {
+      SHOP = creds.shop_domain;
+      TOKEN = creds.access_token;
+      console.log("🏪 Using merchant-specific Shopify credentials");
+    } else {
+      console.log("⚠️ Using fallback ENV Shopify credentials");
     }
 
-    if (!orderId) {
+    if (!SHOP || !TOKEN) {
       return {
         success: false,
-        step: "input",
-        error: "Missing orderId"
-      };
-    }
-
-    if (!trackingNumber) {
-      return {
-        success: false,
-        step: "input",
-        error: "Missing trackingNumber"
+        error: "Missing Shopify credentials"
       };
     }
 
     const fulfillmentOrdersRes = await fetch(
-      `https://${shop}/admin/api/${API_VERSION}/orders/${orderId}/fulfillment_orders.json`,
+      `https://${SHOP}/admin/api/${API_VERSION}/orders/${orderId}/fulfillment_orders.json`,
       {
-        method: "GET",
         headers: {
-          "X-Shopify-Access-Token": token,
-          "Content-Type": "application/json"
+          "X-Shopify-Access-Token": TOKEN
         }
       }
     );
 
-    const fulfillmentOrdersParsed = await parseResponse(fulfillmentOrdersRes);
-
-    console.log("📡 Shopify fulfillment_orders status:", fulfillmentOrdersRes.status);
-    console.log("📡 Shopify fulfillment_orders response:");
-    console.log(
-      fulfillmentOrdersParsed.type === "json"
-        ? JSON.stringify(fulfillmentOrdersParsed.data, null, 2)
-        : fulfillmentOrdersParsed.data
-    );
+    const parsed = await parseResponse(fulfillmentOrdersRes);
 
     if (!fulfillmentOrdersRes.ok) {
       return {
         success: false,
-        step: "get_fulfillment_orders",
-        status: fulfillmentOrdersRes.status,
-        error: getErrorMessage(
-          fulfillmentOrdersParsed,
-          "Failed to fetch fulfillment orders"
-        ),
-        raw: fulfillmentOrdersParsed.data
+        error: "Failed to fetch fulfillment orders",
+        raw: parsed.data
       };
     }
 
-    const fulfillmentOrdersData = fulfillmentOrdersParsed.data;
+    const fulfillmentOrderId =
+      parsed.data?.fulfillment_orders?.[0]?.id;
 
-    if (
-      !fulfillmentOrdersData ||
-      !Array.isArray(fulfillmentOrdersData.fulfillment_orders) ||
-      fulfillmentOrdersData.fulfillment_orders.length === 0
-    ) {
+    if (!fulfillmentOrderId) {
       return {
         success: false,
-        step: "get_fulfillment_orders",
-        status: fulfillmentOrdersRes.status,
-        error: "No fulfillment orders found for this order",
-        raw: fulfillmentOrdersData
+        error: "No fulfillment order found"
       };
     }
-
-    const fulfillmentOrderId = fulfillmentOrdersData.fulfillment_orders[0].id;
 
     console.log("✅ Fulfillment order found:", fulfillmentOrderId);
 
-    return await createFulfillmentWithRetry({
-      shop,
-      token,
+    return await createFulfillmentWithRetry(
+      SHOP,
+      TOKEN,
       fulfillmentOrderId,
       trackingNumber,
       trackingUrl
-    });
+    );
   } catch (error) {
     return {
       success: false,
-      step: "exception",
       error: error.message
     };
   }

@@ -116,22 +116,6 @@ function normalizeAdminFilters(queryParams) {
   };
 }
 
-function getShipmentPolicyState(shipment) {
-  const lastSyncStatus = String(
-    shipment?.carrier_last_sync_status || ""
-  ).toLowerCase();
-
-  if (lastSyncStatus === "disabled_by_merchant" || lastSyncStatus === "disabled") {
-    return "blocked";
-  }
-
-  if (Boolean(shipment?.fallback_used)) {
-    return "fallback";
-  }
-
-  return "ok";
-}
-
 function matchesAdminFilters(shipment, filters) {
   const searchHaystack = [
     shipment.order_name,
@@ -170,9 +154,35 @@ function matchesAdminFilters(shipment, filters) {
   }
 
   if (filters.policy) {
-    const shipmentPolicy = getShipmentPolicyState(shipment);
-    if (shipmentPolicy !== filters.policy) {
-      return false;
+    const carrierLastSyncStatus = String(
+      shipment.carrier_last_sync_status || ""
+    ).toLowerCase();
+
+    const fallbackUsed = Boolean(shipment.fallback_used);
+
+    if (filters.policy === "blocked") {
+      if (
+        carrierLastSyncStatus !== "disabled_by_merchant" &&
+        carrierLastSyncStatus !== "disabled"
+      ) {
+        return false;
+      }
+    }
+
+    if (filters.policy === "fallback") {
+      if (!fallbackUsed) {
+        return false;
+      }
+    }
+
+    if (filters.policy === "ok") {
+      const isBlocked =
+        carrierLastSyncStatus === "disabled_by_merchant" ||
+        carrierLastSyncStatus === "disabled";
+
+      if (isBlocked || fallbackUsed) {
+        return false;
+      }
     }
   }
 
@@ -469,6 +479,39 @@ async function resolveMerchantContextFromRequest(req) {
     shopDomain,
     defaultMerchantId
   });
+}
+
+async function getMerchantShipmentOverview(merchantId) {
+  const safeMerchantId = normalizeMerchantId(merchantId);
+
+  const result = await query(
+    `
+      SELECT
+        COUNT(*)::int AS total_shipments,
+        COUNT(*) FILTER (
+          WHERE COALESCE(fallback_used, false) = true
+        )::int AS fallback_shipments,
+        COUNT(*) FILTER (
+          WHERE LOWER(COALESCE(carrier_last_sync_status, '')) IN ('disabled_by_merchant', 'disabled')
+        )::int AS blocked_tracking_shipments,
+        COUNT(*) FILTER (
+          WHERE COALESCE(fallback_used, false) = false
+            AND LOWER(COALESCE(carrier_last_sync_status, '')) NOT IN ('disabled_by_merchant', 'disabled')
+        )::int AS policy_ok_shipments
+      FROM shipments
+      WHERE LOWER(COALESCE(merchant_id, 'default')) = $1
+    `,
+    [safeMerchantId]
+  );
+
+  return (
+    result.rows[0] || {
+      total_shipments: 0,
+      fallback_shipments: 0,
+      blocked_tracking_shipments: 0,
+      policy_ok_shipments: 0
+    }
+  );
 }
 
 function renderDHLTestPage({
@@ -963,12 +1006,15 @@ app.get("/admin/shipment/:orderId", async (req, res) => {
       externalSource: shipment.actual_carrier || "carrier"
     });
 
+    const merchantOverview = await getMerchantShipmentOverview(shipment.merchant_id);
+
     return res.status(200).send(
       renderAdminShipmentDetails({
         shipment,
         events,
         carrierTracking,
-        syncState: String(req.query.sync || "")
+        syncState: String(req.query.sync || ""),
+        merchantOverview
       })
     );
   } catch (error) {

@@ -1,10 +1,5 @@
 const { query } = require("./db");
 
-function normalizeMerchantId(value) {
-  const text = String(value || "").trim().toLowerCase();
-  return text || "default";
-}
-
 function normalizeShopDomain(value) {
   const text = String(value || "")
     .trim()
@@ -15,34 +10,75 @@ function normalizeShopDomain(value) {
   return text || null;
 }
 
+function normalizeMerchantId(value) {
+  let text = String(value || "").trim().toLowerCase();
+
+  if (!text) {
+    return "default";
+  }
+
+  text = text
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "");
+
+  if (text.endsWith(".myshopify.com")) {
+    text = text.slice(0, -".myshopify.com".length);
+  }
+
+  text = text
+    .replace(/[^a-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return text || "default";
+}
+
 function buildMerchantIdFromShopDomain(shopDomain) {
   const normalized = normalizeShopDomain(shopDomain);
 
   if (!normalized) {
-    return null;
+    return "default";
   }
 
-  return normalized.replace(/[^a-z0-9.-]/g, "-");
+  let merchantId = normalized;
+
+  if (merchantId.endsWith(".myshopify.com")) {
+    merchantId = merchantId.slice(0, -".myshopify.com".length);
+  }
+
+  merchantId = merchantId
+    .replace(/[^a-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return merchantId || "default";
 }
 
-function maskSecret(value) {
-  const text = String(value || "").trim();
+async function findMerchantById(merchantId) {
+  const safeMerchantId = normalizeMerchantId(merchantId);
 
-  if (!text) {
-    return null;
-  }
+  const result = await query(
+    `
+      SELECT
+        id,
+        name,
+        status,
+        created_at,
+        updated_at
+      FROM merchants
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [safeMerchantId]
+  );
 
-  if (text.length <= 8) {
-    return "********";
-  }
-
-  return `${text.slice(0, 4)}********${text.slice(-4)}`;
+  return result.rows[0] || null;
 }
 
 async function findMerchantByShopDomain(shopDomain) {
-  const normalizedShopDomain = normalizeShopDomain(shopDomain);
+  const safeShopDomain = normalizeShopDomain(shopDomain);
 
-  if (!normalizedShopDomain) {
+  if (!safeShopDomain) {
     return null;
   }
 
@@ -65,7 +101,7 @@ async function findMerchantByShopDomain(shopDomain) {
       WHERE s.shop_domain = $1
       LIMIT 1
     `,
-    [normalizedShopDomain]
+    [safeShopDomain]
   );
 
   return result.rows[0] || null;
@@ -76,12 +112,12 @@ async function resolveMerchantContext({
   shopDomain,
   defaultMerchantId = "default"
 } = {}) {
-  const normalizedShopDomain = normalizeShopDomain(shopDomain);
-  const normalizedExplicitMerchantId = normalizeMerchantId(explicitMerchantId);
-  const normalizedDefaultMerchantId = normalizeMerchantId(defaultMerchantId);
+  const safeShopDomain = normalizeShopDomain(shopDomain);
+  const safeExplicitMerchantId = normalizeMerchantId(explicitMerchantId);
+  const safeDefaultMerchantId = normalizeMerchantId(defaultMerchantId);
 
-  if (normalizedShopDomain) {
-    const storeRecord = await findMerchantByShopDomain(normalizedShopDomain);
+  if (safeShopDomain) {
+    const storeRecord = await findMerchantByShopDomain(safeShopDomain);
 
     if (
       storeRecord &&
@@ -90,92 +126,36 @@ async function resolveMerchantContext({
     ) {
       return {
         merchant_id: normalizeMerchantId(storeRecord.merchant_id),
-        shop_domain: normalizedShopDomain,
+        shop_domain: safeShopDomain,
         source: "registry",
         merchant_name: storeRecord.merchant_name || null
       };
     }
   }
 
-  if (normalizedExplicitMerchantId && normalizedExplicitMerchantId !== "default") {
+  if (safeExplicitMerchantId && safeExplicitMerchantId !== "default") {
     return {
-      merchant_id: normalizedExplicitMerchantId,
-      shop_domain: normalizedShopDomain,
+      merchant_id: safeExplicitMerchantId,
+      shop_domain: safeShopDomain,
       source: "explicit",
       merchant_name: null
     };
   }
 
+  if (safeShopDomain) {
+    return {
+      merchant_id: buildMerchantIdFromShopDomain(safeShopDomain),
+      shop_domain: safeShopDomain,
+      source: "shop_domain_fallback",
+      merchant_name: null
+    };
+  }
+
   return {
-    merchant_id:
-      buildMerchantIdFromShopDomain(normalizedShopDomain) || normalizedDefaultMerchantId,
-    shop_domain: normalizedShopDomain,
-    source: normalizedShopDomain ? "shop_domain_fallback" : "default_fallback",
+    merchant_id: safeDefaultMerchantId,
+    shop_domain: null,
+    source: "default_fallback",
     merchant_name: null
-  };
-}
-
-async function resolveShopifyStoreCredentials({
-  shopDomain,
-  merchantId
-} = {}) {
-  const normalizedShopDomain = normalizeShopDomain(shopDomain);
-  const normalizedMerchantId = normalizeMerchantId(merchantId);
-
-  if (normalizedShopDomain) {
-    const store = await findMerchantByShopDomain(normalizedShopDomain);
-
-    if (store && store.is_active === true) {
-      return {
-        source: "store_registry",
-        shop_domain: normalizeShopDomain(store.shop_domain),
-        merchant_id: normalizeMerchantId(store.merchant_id),
-        access_token: String(store.shopify_admin_access_token || "").trim() || null,
-        webhook_secret: String(store.shopify_webhook_secret || "").trim() || null,
-        is_active: Boolean(store.is_active)
-      };
-    }
-  }
-
-  if (normalizedMerchantId && normalizedMerchantId !== "default") {
-    const result = await query(
-      `
-        SELECT
-          s.shop_domain,
-          s.merchant_id,
-          s.is_active,
-          s.shopify_admin_access_token,
-          s.shopify_webhook_secret
-        FROM shopify_stores s
-        WHERE s.merchant_id = $1
-          AND s.is_active = true
-        ORDER BY s.id ASC
-        LIMIT 1
-      `,
-      [normalizedMerchantId]
-    );
-
-    const row = result.rows[0] || null;
-
-    if (row) {
-      return {
-        source: "merchant_store_fallback",
-        shop_domain: normalizeShopDomain(row.shop_domain),
-        merchant_id: normalizeMerchantId(row.merchant_id),
-        access_token: String(row.shopify_admin_access_token || "").trim() || null,
-        webhook_secret: String(row.shopify_webhook_secret || "").trim() || null,
-        is_active: Boolean(row.is_active)
-      };
-    }
-  }
-
-  return {
-    source: "env_fallback",
-    shop_domain: normalizeShopDomain(process.env.SHOPIFY_STORE_URL || ""),
-    merchant_id: normalizedMerchantId || "default",
-    access_token: String(process.env.SHOPIFY_ACCESS_TOKEN || "").trim() || null,
-    webhook_secret: String(process.env.SHOPIFY_WEBHOOK_SECRET || "").trim() || null,
-    is_active: true
   };
 }
 
@@ -222,29 +202,25 @@ async function upsertShopifyStore({
   shop_domain,
   merchant_id,
   is_active = true,
-  shopify_admin_access_token,
-  shopify_webhook_secret
+  shopify_admin_access_token = null,
+  shopify_webhook_secret = null
 }) {
-  const normalizedShopDomain = normalizeShopDomain(shop_domain);
-  const normalizedMerchantId = normalizeMerchantId(merchant_id);
+  const safeShopDomain = normalizeShopDomain(shop_domain);
+  const safeMerchantId = normalizeMerchantId(merchant_id);
 
-  if (!normalizedShopDomain) {
+  if (!safeShopDomain) {
     throw new Error("Missing shop domain");
   }
 
-  if (!normalizedMerchantId) {
+  if (!safeMerchantId) {
     throw new Error("Missing merchant id");
   }
 
-  const accessToken =
-    shopify_admin_access_token !== undefined
-      ? String(shopify_admin_access_token || "").trim() || null
-      : null;
-
-  const webhookSecret =
-    shopify_webhook_secret !== undefined
-      ? String(shopify_webhook_secret || "").trim() || null
-      : null;
+  await upsertMerchant({
+    id: safeMerchantId,
+    name: safeMerchantId,
+    status: "active"
+  });
 
   const result = await query(
     `
@@ -276,11 +252,11 @@ async function upsertShopifyStore({
       RETURNING *
     `,
     [
-      normalizedShopDomain,
-      normalizedMerchantId,
+      safeShopDomain,
+      safeMerchantId,
       Boolean(is_active),
-      accessToken,
-      webhookSecret
+      shopify_admin_access_token ? String(shopify_admin_access_token).trim() : null,
+      shopify_webhook_secret ? String(shopify_webhook_secret).trim() : null
     ]
   );
 
@@ -338,22 +314,79 @@ async function listShopifyStores() {
     `
   );
 
-  return result.rows.map((row) => ({
-    ...row,
-    shopify_admin_access_token_masked: maskSecret(row.shopify_admin_access_token),
-    shopify_webhook_secret_masked: maskSecret(row.shopify_webhook_secret)
-  }));
+  return result.rows;
+}
+
+async function resolveShopifyStoreCredentials({
+  shopDomain,
+  merchantId
+} = {}) {
+  const safeShopDomain = normalizeShopDomain(shopDomain);
+  const safeMerchantId = normalizeMerchantId(merchantId);
+
+  if (safeShopDomain) {
+    const storeByDomain = await findMerchantByShopDomain(safeShopDomain);
+
+    if (storeByDomain && storeByDomain.is_active === true) {
+      return {
+        source: "store_registry",
+        shop_domain: storeByDomain.shop_domain,
+        merchant_id: normalizeMerchantId(storeByDomain.merchant_id),
+        access_token: String(storeByDomain.shopify_admin_access_token || "").trim() || null,
+        webhook_secret: String(storeByDomain.shopify_webhook_secret || "").trim() || null
+      };
+    }
+  }
+
+  if (safeMerchantId && safeMerchantId !== "default") {
+    const result = await query(
+      `
+        SELECT
+          shop_domain,
+          merchant_id,
+          is_active,
+          shopify_admin_access_token,
+          shopify_webhook_secret
+        FROM shopify_stores
+        WHERE merchant_id = $1
+        ORDER BY id ASC
+        LIMIT 1
+      `,
+      [safeMerchantId]
+    );
+
+    if (result.rows.length > 0) {
+      const row = result.rows[0];
+
+      return {
+        source: "merchant_registry",
+        shop_domain: row.shop_domain,
+        merchant_id: normalizeMerchantId(row.merchant_id),
+        access_token: String(row.shopify_admin_access_token || "").trim() || null,
+        webhook_secret: String(row.shopify_webhook_secret || "").trim() || null
+      };
+    }
+  }
+
+  return {
+    source: "env_fallback",
+    shop_domain: safeShopDomain,
+    merchant_id: safeMerchantId || "default",
+    access_token: String(process.env.SHOPIFY_ACCESS_TOKEN || "").trim() || null,
+    webhook_secret: String(process.env.SHOPIFY_API_SECRET || "").trim() || null
+  };
 }
 
 module.exports = {
   normalizeMerchantId,
   normalizeShopDomain,
   buildMerchantIdFromShopDomain,
+  findMerchantById,
   findMerchantByShopDomain,
   resolveMerchantContext,
-  resolveShopifyStoreCredentials,
   upsertMerchant,
   upsertShopifyStore,
   listMerchants,
-  listShopifyStores
+  listShopifyStores,
+  resolveShopifyStoreCredentials
 };

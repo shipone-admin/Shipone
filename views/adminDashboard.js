@@ -295,6 +295,7 @@ function renderRowActions(shipment, detailsUrl) {
   const orderId = encodeURIComponent(shipment.order_id || "");
   const jsonUrl = `/shipments/${orderId}`;
   const manualSyncUrl = `/admin/shipment/${orderId}/sync`;
+  const trackingBlocked = isMerchantTrackingBlocked(shipment);
 
   return `
     <div class="row-actions">
@@ -316,16 +317,32 @@ function renderRowActions(shipment, detailsUrl) {
         JSON
       </a>
 
-      <form
-        class="inline-form"
-        method="POST"
-        action="${manualSyncUrl}"
-        onsubmit="event.stopPropagation();"
-      >
-        <button class="sync-action-button" type="submit">
-          Sync
-        </button>
-      </form>
+      ${
+        trackingBlocked
+          ? `
+            <button
+              class="sync-action-button sync-action-button-disabled"
+              type="button"
+              title="Tracking är blockerad av merchant-policy"
+              onclick="event.stopPropagation();"
+              disabled
+            >
+              Sync spärrad
+            </button>
+          `
+          : `
+            <form
+              class="inline-form"
+              method="POST"
+              action="${manualSyncUrl}"
+              onsubmit="event.stopPropagation();"
+            >
+              <button class="sync-action-button" type="submit">
+                Sync
+              </button>
+            </form>
+          `
+      }
     </div>
   `;
 }
@@ -923,7 +940,7 @@ function renderAdminDashboard({
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          min-width: 78px;
+          min-width: 96px;
           padding: 8px 12px;
           border-radius: 10px;
           border: 1px solid #fde68a;
@@ -937,6 +954,14 @@ function renderAdminDashboard({
 
         .sync-action-button:hover {
           filter: brightness(0.98);
+        }
+
+        .sync-action-button-disabled {
+          background: #e5e7eb;
+          border-color: #d1d5db;
+          color: #6b7280;
+          box-shadow: none;
+          cursor: not-allowed;
         }
 
         .badge {

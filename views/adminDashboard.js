@@ -56,6 +56,8 @@ function formatSyncStatus(status) {
 
   if (normalized === "success") return "OK";
   if (normalized === "failed") return "Fel";
+  if (normalized === "disabled_by_merchant") return "Blockerad";
+  if (normalized === "disabled") return "Blockerad";
 
   return "-";
 }
@@ -83,16 +85,6 @@ function formatShipOneChoice(choice) {
   return choice || "-";
 }
 
-function formatMerchantLabel(merchantId) {
-  const value = String(merchantId || "").trim();
-  return value || "default";
-}
-
-function formatShopDomain(shopDomain) {
-  const value = String(shopDomain || "").trim();
-  return value || "-";
-}
-
 function getStatusClass(status) {
   const normalized = String(status || "").toLowerCase();
 
@@ -108,6 +100,8 @@ function getSyncClass(status) {
 
   if (normalized === "success") return "sync-ok";
   if (normalized === "failed") return "sync-failed";
+  if (normalized === "disabled_by_merchant") return "sync-blocked";
+  if (normalized === "disabled") return "sync-blocked";
 
   return "sync-neutral";
 }
@@ -144,40 +138,65 @@ function buildStats(shipments) {
   const list = Array.isArray(shipments) ? shipments : [];
 
   const total = list.length;
+  const merchantCount = new Set(
+    list.map((shipment) => String(shipment.merchant_id || "default"))
+  ).size;
   const completed = list.filter(
     (shipment) => String(shipment.status || "").toLowerCase() === "completed"
   ).length;
   const problems = list.filter((shipment) => shipment.health === "problem").length;
   const waitingForNextSync = list.filter((shipment) => hasUpcomingSync(shipment)).length;
-  const merchants = new Set(
-    list.map((shipment) => formatMerchantLabel(shipment.merchant_id))
-  );
 
   return {
     total,
+    merchantCount,
     completed,
     problems,
-    waitingForNextSync,
-    merchantCount: merchants.size
+    waitingForNextSync
   };
 }
 
-function buildMerchantOptions(shipments) {
-  const values = Array.from(
-    new Set(
-      (Array.isArray(shipments) ? shipments : [])
-        .map((shipment) => formatMerchantLabel(shipment.merchant_id))
-        .filter(Boolean)
-    )
+function isMerchantTrackingBlocked(shipment) {
+  return (
+    String(shipment?.carrier_last_sync_status || "").toLowerCase() ===
+    "disabled_by_merchant"
   );
+}
 
-  return values.sort((a, b) => a.localeCompare(b, "sv"));
+function buildPolicySummary(shipment) {
+  const selectedCarrier = String(shipment?.selected_carrier || "").toLowerCase();
+  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+  const fallbackUsed = Boolean(shipment?.fallback_used);
+  const trackingBlocked = isMerchantTrackingBlocked(shipment);
+
+  if (trackingBlocked) {
+    return {
+      label: "Tracking blockerad",
+      text: `Merchant-policy stoppar live tracking för ${formatCarrierName(actualCarrier)}.`,
+      className: "policy-blocked"
+    };
+  }
+
+  if (fallbackUsed && selectedCarrier && actualCarrier && selectedCarrier !== actualCarrier) {
+    return {
+      label: "Fallback använd",
+      text: `Merchant tillät inte eller kunde inte använda vald carrier fullt ut. Faktisk carrier blev ${formatCarrierName(actualCarrier)}.`,
+      className: "policy-warning"
+    };
+  }
+
+  return {
+    label: "Policy OK",
+    text: "Inget tydligt merchant-policyblock syns för detta shipment.",
+    className: "policy-ok"
+  };
 }
 
 function renderHealthPill(shipment) {
   const label = escapeHtml(shipment.healthLabel || "-");
   const reason = escapeHtml(shipment.healthReason || "");
   const className = escapeHtml(shipment.healthClass || "health-neutral");
+  const policy = buildPolicySummary(shipment);
 
   return `
     <div class="health-cell">
@@ -185,20 +204,9 @@ function renderHealthPill(shipment) {
         ${label}
       </span>
       <div class="health-reason">${reason}</div>
-    </div>
-  `;
-}
-
-function renderMerchantCell(shipment) {
-  const merchantLabel = escapeHtml(formatMerchantLabel(shipment.merchant_id));
-  const shopDomain = escapeHtml(formatShopDomain(shipment.shop_domain));
-
-  return `
-    <div class="merchant-block">
-      <div class="primary">
-        <span class="merchant-pill">${merchantLabel}</span>
+      <div class="policy-inline ${escapeHtml(policy.className)}">
+        <strong>${escapeHtml(policy.label)}:</strong> ${escapeHtml(policy.text)}
       </div>
-      <div class="secondary">Shop: ${shopDomain}</div>
     </div>
   `;
 }
@@ -267,6 +275,18 @@ function renderStrategyCell(shipment) {
       <div class="secondary">
         ${fallbackUsed ? "Fallback använd" : "Ingen fallback"}
       </div>
+    </div>
+  `;
+}
+
+function renderMerchantCell(shipment) {
+  const merchantId = escapeHtml(shipment.merchant_id || "default");
+  const shopDomain = escapeHtml(shipment.shop_domain || "-");
+
+  return `
+    <div class="merchant-block">
+      <div class="primary mono">${merchantId}</div>
+      <div class="secondary">Shop: ${shopDomain}</div>
     </div>
   `;
 }
@@ -446,7 +466,6 @@ function renderAdminDashboard({
   const carrier = String(filters.carrier || "");
   const merchant = String(filters.merchant || "");
   const stats = buildStats(visibleShipments);
-  const merchantOptions = buildMerchantOptions(enrichedShipments);
 
   return `
     <!DOCTYPE html>
@@ -504,7 +523,7 @@ function renderAdminDashboard({
         }
 
         .wrap {
-          max-width: 1720px;
+          max-width: 1700px;
           margin: 0 auto;
         }
 
@@ -588,7 +607,7 @@ function renderAdminDashboard({
           color: var(--muted);
           font-size: 17px;
           line-height: 1.7;
-          max-width: 900px;
+          max-width: 980px;
         }
 
         .stats {
@@ -619,11 +638,6 @@ function renderAdminDashboard({
         .stat-card.waiting {
           border-color: #d7e6ff;
           background: linear-gradient(180deg, #fbfdff 0%, #f4f9ff 100%);
-        }
-
-        .stat-card.merchant {
-          border-color: #dbeafe;
-          background: linear-gradient(180deg, #fbfdff 0%, #f4f8ff 100%);
         }
 
         .stat-label {
@@ -660,7 +674,7 @@ function renderAdminDashboard({
 
         .filters-form {
           display: grid;
-          grid-template-columns: 2fr 1fr 1fr 1fr 1.3fr auto auto;
+          grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto auto;
           gap: 12px;
           align-items: end;
         }
@@ -789,7 +803,7 @@ function renderAdminDashboard({
           width: 100%;
           border-collapse: separate;
           border-spacing: 0;
-          min-width: 1940px;
+          min-width: 1920px;
         }
 
         thead th {
@@ -954,20 +968,6 @@ function renderAdminDashboard({
           color: var(--neutral-text);
         }
 
-        .merchant-pill {
-          display: inline-flex;
-          align-items: center;
-          border-radius: 999px;
-          padding: 8px 12px;
-          font-size: 12px;
-          font-weight: 800;
-          background: #eef4ff;
-          color: #1d4ed8;
-          border: 1px solid #dbeafe;
-          max-width: 100%;
-          word-break: break-word;
-        }
-
         .carrier-pill {
           display: inline-flex;
           align-items: center;
@@ -1016,14 +1016,19 @@ function renderAdminDashboard({
           color: var(--danger-text);
         }
 
+        .sync-blocked {
+          background: #fff7ed;
+          color: #c2410c;
+        }
+
         .sync-neutral {
           background: var(--neutral-bg);
           color: var(--neutral-text);
         }
 
         .health-cell {
-          min-width: 240px;
-          max-width: 280px;
+          min-width: 280px;
+          max-width: 340px;
         }
 
         .health-pill {
@@ -1067,6 +1072,35 @@ function renderAdminDashboard({
           color: var(--neutral-text);
         }
 
+        .policy-inline {
+          margin-top: 10px;
+          padding: 10px 12px;
+          border-radius: 12px;
+          font-size: 12px;
+          line-height: 1.5;
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+          color: #334155;
+        }
+
+        .policy-ok {
+          background: #ecfdf5;
+          border-color: #bbf7d0;
+          color: #065f46;
+        }
+
+        .policy-warning {
+          background: #fff7ed;
+          border-color: #fed7aa;
+          color: #9a3412;
+        }
+
+        .policy-blocked {
+          background: #fef2f2;
+          border-color: #fecaca;
+          color: #991b1b;
+        }
+
         .mono {
           font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
           font-size: 13px;
@@ -1106,13 +1140,13 @@ function renderAdminDashboard({
           background: #fff;
         }
 
-        @media (max-width: 1380px) {
+        @media (max-width: 1280px) {
           .stats {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: 1fr 1fr;
           }
 
           .filters-form {
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr;
           }
 
           h1 {
@@ -1132,10 +1166,6 @@ function renderAdminDashboard({
           }
 
           .stats {
-            grid-template-columns: 1fr;
-          }
-
-          .filters-form {
             grid-template-columns: 1fr;
           }
 
@@ -1176,7 +1206,7 @@ function renderAdminDashboard({
               <div class="stat-value">${stats.total}</div>
             </div>
 
-            <div class="stat-card merchant">
+            <div class="stat-card">
               <div class="stat-label">Merchants</div>
               <div class="stat-value">${stats.merchantCount}</div>
             </div>
@@ -1247,18 +1277,14 @@ function renderAdminDashboard({
 
             <div class="field">
               <label for="merchant">Merchant</label>
-              <select class="select" id="merchant" name="merchant">
-                <option value="" ${merchant === "" ? "selected" : ""}>Alla</option>
-                ${merchantOptions
-                  .map(
-                    (option) => `
-                      <option value="${escapeHtml(option)}" ${merchant === option ? "selected" : ""}>
-                        ${escapeHtml(option)}
-                      </option>
-                    `
-                  )
-                  .join("")}
-              </select>
+              <input
+                class="input"
+                id="merchant"
+                name="merchant"
+                type="text"
+                value="${escapeHtml(merchant)}"
+                placeholder="Merchant ID"
+              />
             </div>
 
             <button class="filter-button" type="submit">Filtrera</button>
@@ -1266,14 +1292,14 @@ function renderAdminDashboard({
           </form>
 
           ${
-            filters.q || filters.status || filters.carrier || health || filters.merchant
+            filters.q || filters.status || filters.carrier || health || merchant
               ? `
                 <div class="active-filters">
                   ${filters.q ? `<div class="filter-pill">Sök: ${escapeHtml(filters.q)}</div>` : ""}
                   ${filters.status ? `<div class="filter-pill">Status: ${escapeHtml(formatShipmentStatus(filters.status))}</div>` : ""}
                   ${filters.carrier ? `<div class="filter-pill">Carrier: ${escapeHtml(formatCarrierName(filters.carrier))}</div>` : ""}
                   ${health ? `<div class="filter-pill">Health: ${escapeHtml(formatHealthLabel(health))}</div>` : ""}
-                  ${filters.merchant ? `<div class="filter-pill">Merchant: ${escapeHtml(formatMerchantLabel(filters.merchant))}</div>` : ""}
+                  ${merchant ? `<div class="filter-pill">Merchant: ${escapeHtml(merchant)}</div>` : ""}
                 </div>
               `
               : ""
@@ -1294,7 +1320,7 @@ function renderAdminDashboard({
                 <tr>
                   <th>Order</th>
                   <th>Merchant</th>
-                  <th>Health</th>
+                  <th>Health & policy</th>
                   <th>Strategi</th>
                   <th>Carrier</th>
                   <th>Status</th>

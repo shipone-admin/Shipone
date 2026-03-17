@@ -7,7 +7,7 @@ const {
   upsertMerchant
 } = require("./merchantStore");
 
-async function loadShipmentsWithNonCanonicalMerchantIds() {
+async function loadAllShipments() {
   const result = await query(
     `
       SELECT
@@ -44,7 +44,7 @@ async function resolveCanonicalMerchantIdForShipment(shipment) {
 }
 
 async function migrateShipmentMerchantIds() {
-  const shipments = await loadShipmentsWithNonCanonicalMerchantIds();
+  const shipments = await loadAllShipments();
 
   let scanned = 0;
   let updated = 0;
@@ -54,16 +54,18 @@ async function migrateShipmentMerchantIds() {
   for (const shipment of shipments) {
     scanned += 1;
 
-    const beforeMerchantId = normalizeMerchantId(shipment.merchant_id);
-    const afterMerchantId = await resolveCanonicalMerchantIdForShipment(shipment);
+    const rawBeforeMerchantId = String(shipment.merchant_id || "").trim();
+    const canonicalAfterMerchantId = await resolveCanonicalMerchantIdForShipment(
+      shipment
+    );
 
     await upsertMerchant({
-      id: afterMerchantId,
-      name: afterMerchantId,
+      id: canonicalAfterMerchantId,
+      name: canonicalAfterMerchantId,
       status: "active"
     });
 
-    if (beforeMerchantId === afterMerchantId) {
+    if (rawBeforeMerchantId === canonicalAfterMerchantId) {
       unchanged += 1;
       continue;
     }
@@ -76,7 +78,7 @@ async function migrateShipmentMerchantIds() {
           updated_at = NOW()
         WHERE id = $1
       `,
-      [shipment.id, afterMerchantId]
+      [shipment.id, canonicalAfterMerchantId]
     );
 
     updated += 1;
@@ -87,8 +89,8 @@ async function migrateShipmentMerchantIds() {
       order_name: shipment.order_name || null,
       tracking_number: shipment.tracking_number || null,
       shop_domain: shipment.shop_domain || null,
-      merchant_id_before: beforeMerchantId,
-      merchant_id_after: afterMerchantId
+      merchant_id_before: rawBeforeMerchantId,
+      merchant_id_after: canonicalAfterMerchantId
     });
   }
 

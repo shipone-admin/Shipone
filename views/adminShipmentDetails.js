@@ -222,6 +222,55 @@ function isTrackingBlockedByPolicy(shipment) {
   return lastSyncStatus === "disabled_by_merchant" || lastSyncStatus === "disabled";
 }
 
+function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
+  const badges = [];
+
+  const blockedCount = Number(merchantOverview.blocked_tracking_shipments || 0);
+  const fallbackCount = Number(merchantOverview.fallback_shipments || 0);
+  const policyOkCount = Number(merchantOverview.policy_ok_shipments || 0);
+
+  const actualCarrier = formatCarrierName(shipment?.actual_carrier || "-");
+  const selectedCarrier = formatCarrierName(shipment?.selected_carrier || "-");
+  const fallbackUsed = Boolean(shipment?.fallback_used);
+  const blocked = isTrackingBlockedByPolicy(shipment);
+
+  if (blockedCount > 0) {
+    badges.push({
+      className: "reason-badge-danger",
+      title: "Tracking blockerade",
+      text: `${actualCarrier} tracking avstängd för merchant`
+    });
+  }
+
+  if (fallbackCount > 0) {
+    badges.push({
+      className: "reason-badge-warning",
+      title: "Fallback",
+      text: fallbackUsed
+        ? `Vald carrier ${selectedCarrier} föll tillbaka till ${actualCarrier}`
+        : "Merchanten har fallback-flöden i andra shipments"
+    });
+  }
+
+  if (policyOkCount > 0) {
+    badges.push({
+      className: "reason-badge-success",
+      title: "Policy OK",
+      text: "Det finns shipments utan block eller fallback"
+    });
+  }
+
+  if (badges.length === 0) {
+    badges.push({
+      className: "reason-badge-neutral",
+      title: "Översikt",
+      text: "Ingen extra policyförklaring tillgänglig ännu"
+    });
+  }
+
+  return badges;
+}
+
 function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {
   const merchantId = escapeHtml(shipment?.merchant_id || "default");
   const shopDomain = escapeHtml(shipment?.shop_domain || "-");
@@ -229,6 +278,8 @@ function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {
   const baseAdminUrl = `/admin?merchant=${encodeURIComponent(
     shipment?.merchant_id || "default"
   )}`;
+
+  const badges = buildMerchantReasonBadges(shipment, merchantOverview);
 
   return `
     <div class="card full-width">
@@ -274,6 +325,19 @@ function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {
             String(merchantOverview.policy_ok_shipments ?? 0)
           )}</div>
         </a>
+      </div>
+
+      <div class="reason-badges">
+        ${badges
+          .map(
+            (badge) => `
+              <div class="reason-badge ${escapeHtml(badge.className)}">
+                <div class="reason-badge-title">${escapeHtml(badge.title)}</div>
+                <div class="reason-badge-text">${escapeHtml(badge.text)}</div>
+              </div>
+            `
+          )
+          .join("")}
       </div>
     </div>
   `;
@@ -946,6 +1010,57 @@ function renderAdminShipmentDetails({
           line-height: 1;
         }
 
+        .reason-badges {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+          margin-top: 16px;
+        }
+
+        .reason-badge {
+          border-radius: 16px;
+          padding: 14px;
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+        }
+
+        .reason-badge-title {
+          font-size: 12px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          margin-bottom: 6px;
+        }
+
+        .reason-badge-text {
+          font-size: 14px;
+          line-height: 1.55;
+        }
+
+        .reason-badge-success {
+          background: #ecfdf5;
+          border-color: #bbf7d0;
+          color: #065f46;
+        }
+
+        .reason-badge-warning {
+          background: #fff7ed;
+          border-color: #fed7aa;
+          color: #9a3412;
+        }
+
+        .reason-badge-danger {
+          background: #fef2f2;
+          border-color: #fecaca;
+          color: #991b1b;
+        }
+
+        .reason-badge-neutral {
+          background: #f8fafc;
+          border-color: #e2e8f0;
+          color: #334155;
+        }
+
         .snapshot-lines-wrap {
           display: grid;
           gap: 12px;
@@ -1115,7 +1230,8 @@ function renderAdminShipmentDetails({
 
         @media (max-width: 1120px) {
           .routing-grid,
-          .merchant-overview-grid {
+          .merchant-overview-grid,
+          .reason-badges {
             grid-template-columns: 1fr 1fr;
           }
         }
@@ -1137,7 +1253,8 @@ function renderAdminShipmentDetails({
           }
 
           .routing-grid,
-          .merchant-overview-grid {
+          .merchant-overview-grid,
+          .reason-badges {
             grid-template-columns: 1fr;
           }
         }

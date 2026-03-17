@@ -111,8 +111,25 @@ function normalizeAdminFilters(queryParams) {
     status: String(queryParams.status || "").trim().toLowerCase(),
     carrier: String(queryParams.carrier || "").trim().toLowerCase(),
     health: String(queryParams.health || "").trim().toLowerCase(),
-    merchant: String(queryParams.merchant || "").trim().toLowerCase()
+    merchant: String(queryParams.merchant || "").trim().toLowerCase(),
+    policy: String(queryParams.policy || "").trim().toLowerCase()
   };
+}
+
+function getShipmentPolicyState(shipment) {
+  const lastSyncStatus = String(
+    shipment?.carrier_last_sync_status || ""
+  ).toLowerCase();
+
+  if (lastSyncStatus === "disabled_by_merchant" || lastSyncStatus === "disabled") {
+    return "blocked";
+  }
+
+  if (Boolean(shipment?.fallback_used)) {
+    return "fallback";
+  }
+
+  return "ok";
 }
 
 function matchesAdminFilters(shipment, filters) {
@@ -148,6 +165,13 @@ function matchesAdminFilters(shipment, filters) {
   if (filters.merchant) {
     const shipmentMerchant = String(shipment.merchant_id || "").toLowerCase();
     if (shipmentMerchant !== filters.merchant) {
+      return false;
+    }
+  }
+
+  if (filters.policy) {
+    const shipmentPolicy = getShipmentPolicyState(shipment);
+    if (shipmentPolicy !== filters.policy) {
       return false;
     }
   }

@@ -1,5 +1,8 @@
 const crypto = require("crypto");
-const { resolveShopifyStoreCredentials } = require("./merchantStore");
+const {
+  getShopifyCredentialsByShopDomain,
+  normalizeShopDomain
+} = require("./shopifyStoreCredentials");
 
 function verifyShopifyWebhook(rawBodyBuffer, hmacHeader, secret) {
   if (!rawBodyBuffer || !Buffer.isBuffer(rawBodyBuffer)) {
@@ -16,7 +19,7 @@ function verifyShopifyWebhook(rawBodyBuffer, hmacHeader, secret) {
     .digest("base64");
 
   const digestBuffer = Buffer.from(digest, "utf8");
-  const hmacBuffer = Buffer.from(hmacHeader, "utf8");
+  const hmacBuffer = Buffer.from(String(hmacHeader || "").trim(), "utf8");
 
   if (digestBuffer.length !== hmacBuffer.length) {
     return false;
@@ -25,20 +28,35 @@ function verifyShopifyWebhook(rawBodyBuffer, hmacHeader, secret) {
   return crypto.timingSafeEqual(digestBuffer, hmacBuffer);
 }
 
-async function resolveShopifyWebhookSecret({
-  shopDomain,
-  merchantId
-} = {}) {
-  const credentials = await resolveShopifyStoreCredentials({
-    shopDomain,
-    merchantId
-  });
+async function resolveShopifyWebhookSecret({ shopDomain } = {}) {
+  const normalizedShopDomain = normalizeShopDomain(shopDomain);
+
+  if (normalizedShopDomain) {
+    const storeCredentials = await getShopifyCredentialsByShopDomain(
+      normalizedShopDomain
+    );
+
+    if (
+      storeCredentials &&
+      storeCredentials.is_active &&
+      storeCredentials.webhook_secret
+    ) {
+      return {
+        source: "store_registry",
+        shop_domain: storeCredentials.shop_domain,
+        merchant_id: storeCredentials.merchant_id || null,
+        webhook_secret: storeCredentials.webhook_secret
+      };
+    }
+  }
+
+  const fallbackSecret = String(process.env.SHOPIFY_API_SECRET || "").trim();
 
   return {
-    source: credentials.source,
-    shop_domain: credentials.shop_domain,
-    merchant_id: credentials.merchant_id,
-    webhook_secret: credentials.webhook_secret || null
+    source: "env_fallback",
+    shop_domain: normalizedShopDomain,
+    merchant_id: null,
+    webhook_secret: fallbackSecret || null
   };
 }
 

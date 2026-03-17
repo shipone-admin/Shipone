@@ -189,6 +189,10 @@ function buildStats(shipments) {
   const trackingBlockedCount = list.filter((shipment) =>
     isMerchantTrackingBlocked(shipment)
   ).length;
+  const fallbackCount = list.filter((shipment) => Boolean(shipment.fallback_used)).length;
+  const policyOkCount = list.filter(
+    (shipment) => getPolicyFilterValue(shipment) === "ok"
+  ).length;
 
   return {
     total,
@@ -196,7 +200,9 @@ function buildStats(shipments) {
     completed,
     problems,
     waitingForNextSync,
-    trackingBlockedCount
+    trackingBlockedCount,
+    fallbackCount,
+    policyOkCount
   };
 }
 
@@ -227,6 +233,30 @@ function buildPolicySummary(shipment) {
     text: "Inget tydligt merchant-policyblock syns för detta shipment.",
     className: "policy-ok"
   };
+}
+
+function buildFilterUrl(baseFilters, updates = {}) {
+  const params = new URLSearchParams();
+
+  const merged = {
+    q: baseFilters.q || "",
+    status: baseFilters.status || "",
+    carrier: baseFilters.carrier || "",
+    health: baseFilters.health || "",
+    policy: baseFilters.policy || "",
+    merchant: baseFilters.merchant || "",
+    ...updates
+  };
+
+  Object.entries(merged).forEach(([key, value]) => {
+    const text = String(value || "").trim();
+    if (text) {
+      params.set(key, text);
+    }
+  });
+
+  const query = params.toString();
+  return query ? `/admin?${query}` : "/admin";
 }
 
 function renderHealthPill(shipment) {
@@ -524,6 +554,11 @@ function renderAdminDashboard({
   const merchant = String(filters.merchant || "");
   const stats = buildStats(visibleShipments);
 
+  const totalUrl = buildFilterUrl(filters, { policy: "" });
+  const blockedUrl = buildFilterUrl(filters, { policy: "blocked" });
+  const fallbackUrl = buildFilterUrl(filters, { policy: "fallback" });
+  const policyOkUrl = buildFilterUrl(filters, { policy: "ok" });
+
   return `
     <!DOCTYPE html>
     <html lang="sv">
@@ -675,11 +710,20 @@ function renderAdminDashboard({
         }
 
         .stat-card {
+          display: block;
+          text-decoration: none;
           background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
           border: 1px solid var(--line);
           border-radius: 20px;
           padding: 18px;
           box-shadow: var(--shadow-soft);
+          color: inherit;
+          transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
         }
 
         .stat-card.problem {
@@ -702,6 +746,16 @@ function renderAdminDashboard({
           background: linear-gradient(180deg, #fffdfa 0%, #fff7ed 100%);
         }
 
+        .stat-card.warning {
+          border-color: #fdba74;
+          background: linear-gradient(180deg, #fffdf8 0%, #fff7ed 100%);
+        }
+
+        .stat-card.active {
+          outline: 3px solid rgba(37, 99, 235, 0.18);
+          border-color: #93c5fd;
+        }
+
         .stat-label {
           color: var(--muted);
           font-size: 12px;
@@ -715,6 +769,13 @@ function renderAdminDashboard({
           font-size: 30px;
           font-weight: 800;
           letter-spacing: -0.02em;
+        }
+
+        .stat-meta {
+          margin-top: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--muted);
         }
 
         .filters-card {
@@ -1271,35 +1332,41 @@ function renderAdminDashboard({
           </p>
 
           <div class="stats">
-            <div class="stat-card">
+            <a class="stat-card ${policy === "" ? "active" : ""}" href="${totalUrl}">
               <div class="stat-label">Matchande shipments</div>
               <div class="stat-value">${stats.total}</div>
-            </div>
+              <div class="stat-meta">Visa alla</div>
+            </a>
 
-            <div class="stat-card">
+            <a class="stat-card" href="${buildFilterUrl(filters, {})}">
               <div class="stat-label">Merchants</div>
               <div class="stat-value">${stats.merchantCount}</div>
-            </div>
+              <div class="stat-meta">Unika merchants</div>
+            </a>
 
-            <div class="stat-card success">
-              <div class="stat-label">Slutförda</div>
-              <div class="stat-value">${stats.completed}</div>
-            </div>
+            <a class="stat-card success" href="${policyOkUrl}">
+              <div class="stat-label">Policy OK</div>
+              <div class="stat-value">${stats.policyOkCount}</div>
+              <div class="stat-meta">Utan block/fallback</div>
+            </a>
 
-            <div class="stat-card problem">
-              <div class="stat-label">Problem</div>
-              <div class="stat-value">${stats.problems}</div>
-            </div>
+            <a class="stat-card warning ${policy === "fallback" ? "active" : ""}" href="${fallbackUrl}">
+              <div class="stat-label">Fallback</div>
+              <div class="stat-value">${stats.fallbackCount}</div>
+              <div class="stat-meta">Visa fallback-flöden</div>
+            </a>
 
-            <div class="stat-card waiting">
-              <div class="stat-label">Väntar på nästa sync</div>
-              <div class="stat-value">${stats.waitingForNextSync}</div>
-            </div>
-
-            <div class="stat-card blocked">
+            <a class="stat-card blocked ${policy === "blocked" ? "active" : ""}" href="${blockedUrl}">
               <div class="stat-label">Tracking blockerade</div>
               <div class="stat-value">${stats.trackingBlockedCount}</div>
-            </div>
+              <div class="stat-meta">Merchant-policy</div>
+            </a>
+
+            <a class="stat-card waiting" href="${buildFilterUrl(filters, { policy: "" })}">
+              <div class="stat-label">Väntar på nästa sync</div>
+              <div class="stat-value">${stats.waitingForNextSync}</div>
+              <div class="stat-meta">Planerad sync</div>
+            </a>
           </div>
         </div>
 

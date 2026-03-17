@@ -72,10 +72,10 @@ async function reloadShipmentById(id) {
 
 async function markTrackingDisabledForShipment(shipment, reason) {
   if (!shipment?.id) {
-    return;
+    return null;
   }
 
-  await query(
+  const result = await query(
     `
       UPDATE shipments
       SET
@@ -84,9 +84,12 @@ async function markTrackingDisabledForShipment(shipment, reason) {
         carrier_next_sync_at = NULL,
         updated_at = NOW()
       WHERE id = $1
+      RETURNING *
     `,
     [shipment.id, reason || "disabled_by_merchant"]
   );
+
+  return result.rows[0] || null;
 }
 
 async function canSyncPostNordTrackingForShipment(shipment) {
@@ -94,7 +97,8 @@ async function canSyncPostNordTrackingForShipment(shipment) {
     return {
       allowed: false,
       statusCode: 404,
-      error: "Shipment not found"
+      error: "Shipment not found",
+      skipReason: null
     };
   }
 
@@ -104,7 +108,8 @@ async function canSyncPostNordTrackingForShipment(shipment) {
     return {
       allowed: false,
       statusCode: 400,
-      error: "Tracking sync only supports PostNord shipments"
+      error: "Tracking sync only supports PostNord shipments",
+      skipReason: null
     };
   }
 
@@ -112,11 +117,14 @@ async function canSyncPostNordTrackingForShipment(shipment) {
     return {
       allowed: false,
       statusCode: 400,
-      error: "Shipment is missing tracking number"
+      error: "Shipment is missing tracking number",
+      skipReason: null
     };
   }
 
-  const merchantId = String(shipment.merchant_id || "default").trim().toLowerCase();
+  const merchantId = String(shipment.merchant_id || "default")
+    .trim()
+    .toLowerCase();
 
   const trackingEnabled = await isTrackingCarrierEnabledForMerchant(
     merchantId,
@@ -127,13 +135,16 @@ async function canSyncPostNordTrackingForShipment(shipment) {
     return {
       allowed: false,
       statusCode: 403,
-      error: `Tracking is disabled for merchant ${merchantId} and carrier postnord`
+      error: `Tracking is disabled for merchant ${merchantId} and carrier postnord`,
+      skipReason: "disabled_by_merchant"
     };
   }
 
   return {
     allowed: true,
-    statusCode: 200
+    statusCode: 200,
+    error: null,
+    skipReason: null
   };
 }
 
@@ -142,11 +153,25 @@ async function syncShipment(shipment) {
 
   if (!eligibility.allowed) {
     if (eligibility.statusCode === 403) {
-      await markTrackingDisabledForShipment(shipment, "disabled_by_merchant");
+      const updatedShipment = await markTrackingDisabledForShipment(
+        shipment,
+        eligibility.skipReason || "disabled_by_merchant"
+      );
+
+      return {
+        success: false,
+        skipped: true,
+        skipReason: eligibility.skipReason || "disabled_by_merchant",
+        statusCode: eligibility.statusCode,
+        error: eligibility.error,
+        shipment: updatedShipment || shipment
+      };
     }
 
     return {
       success: false,
+      skipped: false,
+      skipReason: null,
       statusCode: eligibility.statusCode,
       error: eligibility.error,
       shipment
@@ -158,6 +183,8 @@ async function syncShipment(shipment) {
   if (!carrierTracking.success) {
     return {
       success: false,
+      skipped: false,
+      skipReason: null,
       statusCode: 502,
       error: carrierTracking.error || "PostNord tracking fetch failed",
       shipment,
@@ -171,6 +198,8 @@ async function syncShipment(shipment) {
 
   return {
     success: true,
+    skipped: false,
+    skipReason: null,
     statusCode: 200,
     shipment: updatedShipment || shipment,
     carrierTracking,
@@ -184,6 +213,8 @@ async function syncPostNordTrackingByOrderId(orderId) {
   if (!shipment) {
     return {
       success: false,
+      skipped: false,
+      skipReason: null,
       statusCode: 404,
       error: "Shipment not found for order id"
     };
@@ -198,6 +229,8 @@ async function syncPostNordTrackingByTrackingNumber(trackingNumber) {
   if (!shipment) {
     return {
       success: false,
+      skipped: false,
+      skipReason: null,
       statusCode: 404,
       error: "Shipment not found for tracking number"
     };

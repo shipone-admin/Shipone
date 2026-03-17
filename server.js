@@ -1158,12 +1158,18 @@ app.get("/admin/shopify-store/upsert", requireCronSecret, async (req, res) => {
       shop_domain: shopDomain,
       merchant_id: merchantId,
       is_active:
-        String(req.query.is_active || "true").toLowerCase() !== "false"
+        String(req.query.is_active || "true").toLowerCase() !== "false",
+      shopify_admin_access_token: req.query.shopify_admin_access_token,
+      shopify_webhook_secret: req.query.shopify_webhook_secret
     });
 
     return res.status(200).json({
       success: true,
-      store
+      store: {
+        ...store,
+        shopify_admin_access_token: undefined,
+        shopify_webhook_secret: undefined
+      }
     });
   } catch (error) {
     console.error("Shopify store upsert failed:", error.message);
@@ -1310,7 +1316,8 @@ app.post("/webhooks/orders-create", async (req, res) => {
       fulfillmentResult = await fulfillShopifyOrder(
         order.id,
         trackingNumber,
-        trackingUrl
+        trackingUrl,
+        merchantContext
       );
     }
 

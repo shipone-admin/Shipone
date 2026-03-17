@@ -17,7 +17,13 @@ async function runPostNordActiveSyncJob({
       job: "sync-postnord-active",
       startedAt,
       finishedAt: new Date().toISOString(),
-      ...batchResult
+      total: batchResult.total || 0,
+      successCount: batchResult.successCount || 0,
+      skippedCount: batchResult.skippedCount || 0,
+      skippedByMerchantCount: batchResult.skippedByMerchantCount || 0,
+      failureCount: batchResult.failureCount || 0,
+      maxAgeDays: batchResult.maxAgeDays,
+      results: batchResult.results || []
     };
   } catch (error) {
     return {
@@ -25,7 +31,13 @@ async function runPostNordActiveSyncJob({
       job: "sync-postnord-active",
       startedAt,
       finishedAt: new Date().toISOString(),
-      error: error.message || "Job failed"
+      total: 0,
+      successCount: 0,
+      skippedCount: 0,
+      skippedByMerchantCount: 0,
+      failureCount: 1,
+      error: error.message || "Job failed",
+      results: []
     };
   }
 }

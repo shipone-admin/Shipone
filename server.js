@@ -56,6 +56,11 @@ const {
 } = require("./services/merchantCarrierSettings");
 
 const {
+  verifyShopifyWebhook,
+  resolveShopifyWebhookSecret
+} = require("./services/shopifyWebhookVerify");
+
+const {
   renderTrackingPage,
   renderTrackingNotFoundPage,
   renderTrackingErrorPage
@@ -70,8 +75,25 @@ const {
 } = require("./views/adminMerchantCarrierSettings");
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+function captureRawBody(req, res, buffer) {
+  if (buffer && buffer.length > 0) {
+    req.rawBody = Buffer.from(buffer);
+  }
+}
+
+app.use(
+  express.json({
+    verify: captureRawBody
+  })
+);
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    verify: captureRawBody
+  })
+);
 
 const PORT = process.env.PORT || 8080;
 
@@ -1233,9 +1255,47 @@ app.get("/track/:trackingNumber", async (req, res) => {
 
 app.post("/webhooks/orders-create", async (req, res) => {
   const order = req.body;
-  const merchantContext = await resolveMerchantContextFromRequest(req);
 
   try {
+    const shopDomain = normalizeShopDomain(req.headers["x-shopify-shop-domain"]);
+    const hmacHeader = String(req.headers["x-shopify-hmac-sha256"] || "").trim();
+
+    const webhookSecretResolution = await resolveShopifyWebhookSecret({
+      shopDomain
+    });
+
+    if (!webhookSecretResolution.webhook_secret) {
+      console.error("❌ Missing Shopify webhook secret for shop:", shopDomain || "unknown");
+
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized"
+      });
+    }
+
+    const webhookValid = verifyShopifyWebhook(
+      req.rawBody,
+      hmacHeader,
+      webhookSecretResolution.webhook_secret
+    );
+
+    if (!webhookValid) {
+      console.error("❌ Invalid Shopify webhook signature");
+      console.error("🏪 Webhook shop:", shopDomain || "unknown");
+      console.error("🏪 Webhook secret source:", webhookSecretResolution.source);
+
+      return res.status(401).json({
+        success: false,
+        error: "Unauthorized"
+      });
+    }
+
+    console.log("✅ Shopify webhook verified");
+    console.log("🏪 Webhook shop:", webhookSecretResolution.shop_domain || shopDomain || "unknown");
+    console.log("🏪 Webhook secret source:", webhookSecretResolution.source);
+
+    const merchantContext = await resolveMerchantContextFromRequest(req);
+
     if (!order || !order.id) {
       return res.sendStatus(200);
     }
@@ -1352,6 +1412,8 @@ app.post("/webhooks/orders-create", async (req, res) => {
     console.error("Shipment error:", error.message);
 
     if (order && order.id) {
+      const merchantContext = await resolveMerchantContextFromRequest(req);
+
       await failOrderProcessing(
         order.id,
         {

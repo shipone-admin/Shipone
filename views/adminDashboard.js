@@ -134,6 +134,37 @@ function hasUpcomingSync(shipment) {
   return nextSyncDate.getTime() > Date.now();
 }
 
+function isMerchantTrackingBlocked(shipment) {
+  return (
+    String(shipment?.carrier_last_sync_status || "").toLowerCase() ===
+      "disabled_by_merchant" ||
+    String(shipment?.carrier_last_sync_status || "").toLowerCase() ===
+      "disabled"
+  );
+}
+
+function isFallbackShipment(shipment) {
+  const selectedCarrier = String(shipment?.selected_carrier || "").toLowerCase();
+  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+  return Boolean(shipment?.fallback_used) || (
+    selectedCarrier &&
+    actualCarrier &&
+    selectedCarrier !== actualCarrier
+  );
+}
+
+function getPolicyState(shipment) {
+  if (isMerchantTrackingBlocked(shipment)) {
+    return "blocked";
+  }
+
+  if (isFallbackShipment(shipment)) {
+    return "fallback";
+  }
+
+  return "ok";
+}
+
 function matchesHealthFilter(shipment, healthFilter) {
   const normalizedFilter = String(healthFilter || "").toLowerCase();
 
@@ -144,26 +175,6 @@ function matchesHealthFilter(shipment, healthFilter) {
   return String(shipment?.health || "").toLowerCase() === normalizedFilter;
 }
 
-function isMerchantTrackingBlocked(shipment) {
-  return (
-    String(shipment?.carrier_last_sync_status || "").toLowerCase() ===
-      "disabled_by_merchant" ||
-    String(shipment?.carrier_last_sync_status || "").toLowerCase() === "disabled"
-  );
-}
-
-function getPolicyFilterValue(shipment) {
-  if (isMerchantTrackingBlocked(shipment)) {
-    return "blocked";
-  }
-
-  if (Boolean(shipment?.fallback_used)) {
-    return "fallback";
-  }
-
-  return "ok";
-}
-
 function matchesPolicyFilter(shipment, policyFilter) {
   const normalizedFilter = String(policyFilter || "").toLowerCase();
 
@@ -171,7 +182,7 @@ function matchesPolicyFilter(shipment, policyFilter) {
     return true;
   }
 
-  return getPolicyFilterValue(shipment) === normalizedFilter;
+  return getPolicyState(shipment) === normalizedFilter;
 }
 
 function buildStats(shipments) {
@@ -181,28 +192,18 @@ function buildStats(shipments) {
   const merchantCount = new Set(
     list.map((shipment) => String(shipment.merchant_id || "default"))
   ).size;
-  const completed = list.filter(
-    (shipment) => String(shipment.status || "").toLowerCase() === "completed"
-  ).length;
-  const problems = list.filter((shipment) => shipment.health === "problem").length;
+  const policyOk = list.filter((shipment) => getPolicyState(shipment) === "ok").length;
+  const fallbackCount = list.filter((shipment) => getPolicyState(shipment) === "fallback").length;
+  const blockedCount = list.filter((shipment) => getPolicyState(shipment) === "blocked").length;
   const waitingForNextSync = list.filter((shipment) => hasUpcomingSync(shipment)).length;
-  const trackingBlockedCount = list.filter((shipment) =>
-    isMerchantTrackingBlocked(shipment)
-  ).length;
-  const fallbackCount = list.filter((shipment) => Boolean(shipment.fallback_used)).length;
-  const policyOkCount = list.filter(
-    (shipment) => getPolicyFilterValue(shipment) === "ok"
-  ).length;
 
   return {
     total,
     merchantCount,
-    completed,
-    problems,
-    waitingForNextSync,
-    trackingBlockedCount,
+    policyOk,
     fallbackCount,
-    policyOkCount
+    blockedCount,
+    waitingForNextSync
   };
 }
 
@@ -235,28 +236,39 @@ function buildPolicySummary(shipment) {
   };
 }
 
-function buildFilterUrl(baseFilters, updates = {}) {
+function buildFilterUrl(nextFilters = {}) {
   const params = new URLSearchParams();
 
-  const merged = {
-    q: baseFilters.q || "",
-    status: baseFilters.status || "",
-    carrier: baseFilters.carrier || "",
-    health: baseFilters.health || "",
-    policy: baseFilters.policy || "",
-    merchant: baseFilters.merchant || "",
-    ...updates
-  };
+  if (nextFilters.q) params.set("q", nextFilters.q);
+  if (nextFilters.status) params.set("status", nextFilters.status);
+  if (nextFilters.carrier) params.set("carrier", nextFilters.carrier);
+  if (nextFilters.health) params.set("health", nextFilters.health);
+  if (nextFilters.merchant) params.set("merchant", nextFilters.merchant);
+  if (nextFilters.policy) params.set("policy", nextFilters.policy);
 
-  Object.entries(merged).forEach(([key, value]) => {
-    const text = String(value || "").trim();
-    if (text) {
-      params.set(key, text);
-    }
-  });
+  const queryString = params.toString();
+  return queryString ? `/admin?${queryString}` : "/admin";
+}
 
-  const query = params.toString();
-  return query ? `/admin?${query}` : "/admin";
+function renderStatCard({
+  label,
+  value,
+  href,
+  tone = "",
+  subtitle = "",
+  isActive = false
+}) {
+  return `
+    <a class="stat-card ${escapeHtml(tone)} ${isActive ? "stat-card-active" : ""}" href="${escapeHtml(href)}">
+      <div class="stat-label">${escapeHtml(label)}</div>
+      <div class="stat-value">${escapeHtml(value)}</div>
+      ${
+        subtitle
+          ? `<div class="stat-subtitle">${escapeHtml(subtitle)}</div>`
+          : ""
+      }
+    </a>
+  `;
 }
 
 function renderHealthPill(shipment) {
@@ -542,11 +554,12 @@ function renderAdminDashboard({
   const health = String(filters.health || "").trim().toLowerCase();
   const policy = String(filters.policy || "").trim().toLowerCase();
 
-  const visibleShipments = enrichedShipments.filter(
-    (shipment) =>
+  const visibleShipments = enrichedShipments.filter((shipment) => {
+    return (
       matchesHealthFilter(shipment, health) &&
       matchesPolicyFilter(shipment, policy)
-  );
+    );
+  });
 
   const q = escapeHtml(filters.q || "");
   const status = String(filters.status || "");
@@ -554,10 +567,13 @@ function renderAdminDashboard({
   const merchant = String(filters.merchant || "");
   const stats = buildStats(visibleShipments);
 
-  const totalUrl = buildFilterUrl(filters, { policy: "" });
-  const blockedUrl = buildFilterUrl(filters, { policy: "blocked" });
-  const fallbackUrl = buildFilterUrl(filters, { policy: "fallback" });
-  const policyOkUrl = buildFilterUrl(filters, { policy: "ok" });
+  const baseFilters = {
+    q: filters.q || "",
+    status: filters.status || "",
+    carrier: filters.carrier || "",
+    health: filters.health || "",
+    merchant: filters.merchant || ""
+  };
 
   return `
     <!DOCTYPE html>
@@ -712,23 +728,23 @@ function renderAdminDashboard({
         .stat-card {
           display: block;
           text-decoration: none;
+          color: inherit;
           background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
           border: 1px solid var(--line);
           border-radius: 20px;
           padding: 18px;
           box-shadow: var(--shadow-soft);
-          color: inherit;
-          transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+          transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
         }
 
         .stat-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
+          transform: translateY(-1px);
+          border-color: #cfe0ff;
         }
 
-        .stat-card.problem {
-          border-color: #fecaca;
-          background: linear-gradient(180deg, #fffefe 0%, #fff7f7 100%);
+        .stat-card-active {
+          border-color: #93c5fd;
+          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
         }
 
         .stat-card.success {
@@ -736,24 +752,19 @@ function renderAdminDashboard({
           background: linear-gradient(180deg, #fbfffd 0%, #f4fff8 100%);
         }
 
-        .stat-card.waiting {
+        .stat-card.warning {
+          border-color: #fed7aa;
+          background: linear-gradient(180deg, #fffdf9 0%, #fff7ed 100%);
+        }
+
+        .stat-card.danger {
+          border-color: #fecaca;
+          background: linear-gradient(180deg, #fffefe 0%, #fff7f7 100%);
+        }
+
+        .stat-card.info {
           border-color: #d7e6ff;
           background: linear-gradient(180deg, #fbfdff 0%, #f4f9ff 100%);
-        }
-
-        .stat-card.blocked {
-          border-color: #fed7aa;
-          background: linear-gradient(180deg, #fffdfa 0%, #fff7ed 100%);
-        }
-
-        .stat-card.warning {
-          border-color: #fdba74;
-          background: linear-gradient(180deg, #fffdf8 0%, #fff7ed 100%);
-        }
-
-        .stat-card.active {
-          outline: 3px solid rgba(37, 99, 235, 0.18);
-          border-color: #93c5fd;
         }
 
         .stat-label {
@@ -771,11 +782,11 @@ function renderAdminDashboard({
           letter-spacing: -0.02em;
         }
 
-        .stat-meta {
+        .stat-subtitle {
           margin-top: 8px;
           font-size: 12px;
-          font-weight: 700;
           color: var(--muted);
+          line-height: 1.5;
         }
 
         .filters-card {
@@ -1271,11 +1282,13 @@ function renderAdminDashboard({
           background: #fff;
         }
 
-        @media (max-width: 1280px) {
+        @media (max-width: 1400px) {
           .stats {
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
           }
+        }
 
+        @media (max-width: 1280px) {
           .filters-form {
             grid-template-columns: 1fr;
           }
@@ -1328,45 +1341,76 @@ function renderAdminDashboard({
         <div class="hero">
           <h1>Admin Dashboard</h1>
           <p class="subtitle">
-            Här ser du senaste ShipOne-försändelser, live carrier-status, senaste sync och tydliga driftindikatorer för problem, fallback och nästa sync.
+            Här ser du senaste ShipOne-försändelser, live carrier-status, senaste sync och tydliga driftindikatorer för problem, fallback, policyblock och nästa sync.
           </p>
 
           <div class="stats">
-            <a class="stat-card ${policy === "" ? "active" : ""}" href="${totalUrl}">
-              <div class="stat-label">Matchande shipments</div>
-              <div class="stat-value">${stats.total}</div>
-              <div class="stat-meta">Visa alla</div>
-            </a>
+            ${renderStatCard({
+              label: "Matchande shipments",
+              value: String(stats.total),
+              href: buildFilterUrl({
+                ...baseFilters,
+                policy: policy || ""
+              }),
+              subtitle: "Visa aktuell lista",
+              isActive: !policy
+            })}
 
-            <a class="stat-card" href="${buildFilterUrl(filters, {})}">
-              <div class="stat-label">Merchants</div>
-              <div class="stat-value">${stats.merchantCount}</div>
-              <div class="stat-meta">Unika merchants</div>
-            </a>
+            ${renderStatCard({
+              label: "Merchants",
+              value: String(stats.merchantCount),
+              href: "/admin",
+              subtitle: "Unika merchants"
+            })}
 
-            <a class="stat-card success" href="${policyOkUrl}">
-              <div class="stat-label">Policy OK</div>
-              <div class="stat-value">${stats.policyOkCount}</div>
-              <div class="stat-meta">Utan block/fallback</div>
-            </a>
+            ${renderStatCard({
+              label: "Policy OK",
+              value: String(stats.policyOk),
+              href: buildFilterUrl({
+                ...baseFilters,
+                policy: "ok"
+              }),
+              tone: "success",
+              subtitle: "Utan block/fallback",
+              isActive: policy === "ok"
+            })}
 
-            <a class="stat-card warning ${policy === "fallback" ? "active" : ""}" href="${fallbackUrl}">
-              <div class="stat-label">Fallback</div>
-              <div class="stat-value">${stats.fallbackCount}</div>
-              <div class="stat-meta">Visa fallback-flöden</div>
-            </a>
+            ${renderStatCard({
+              label: "Fallback",
+              value: String(stats.fallbackCount),
+              href: buildFilterUrl({
+                ...baseFilters,
+                policy: "fallback"
+              }),
+              tone: "warning",
+              subtitle: "Visa fallback-flöden",
+              isActive: policy === "fallback"
+            })}
 
-            <a class="stat-card blocked ${policy === "blocked" ? "active" : ""}" href="${blockedUrl}">
-              <div class="stat-label">Tracking blockerade</div>
-              <div class="stat-value">${stats.trackingBlockedCount}</div>
-              <div class="stat-meta">Merchant-policy</div>
-            </a>
+            ${renderStatCard({
+              label: "Tracking blockerade",
+              value: String(stats.blockedCount),
+              href: buildFilterUrl({
+                ...baseFilters,
+                policy: "blocked"
+              }),
+              tone: "danger",
+              subtitle: "Merchant-policy",
+              isActive: policy === "blocked"
+            })}
 
-            <a class="stat-card waiting" href="${buildFilterUrl(filters, { policy: "" })}">
-              <div class="stat-label">Väntar på nästa sync</div>
-              <div class="stat-value">${stats.waitingForNextSync}</div>
-              <div class="stat-meta">Planerad sync</div>
-            </a>
+            ${renderStatCard({
+              label: "Väntar på nästa sync",
+              value: String(stats.waitingForNextSync),
+              href: buildFilterUrl({
+                ...baseFilters,
+                health: "waiting",
+                policy: policy || ""
+              }),
+              tone: "info",
+              subtitle: "Planerad sync",
+              isActive: health === "waiting"
+            })}
           </div>
         </div>
 
@@ -1444,7 +1488,7 @@ function renderAdminDashboard({
           </form>
 
           ${
-            filters.q || filters.status || filters.carrier || health || policy || merchant
+            filters.q || filters.status || filters.carrier || health || merchant || policy
               ? `
                 <div class="active-filters">
                   ${filters.q ? `<div class="filter-pill">Sök: ${escapeHtml(filters.q)}</div>` : ""}

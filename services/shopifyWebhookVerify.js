@@ -1,9 +1,5 @@
-// ================================
-// SHOPIFY WEBHOOK HMAC VERIFICATION
-// BUFFER-SAFE VERSION
-// ================================
-
 const crypto = require("crypto");
+const { resolveShopifyStoreCredentials } = require("./merchantStore");
 
 function verifyShopifyWebhook(rawBodyBuffer, hmacHeader, secret) {
   if (!rawBodyBuffer || !Buffer.isBuffer(rawBodyBuffer)) {
@@ -29,4 +25,24 @@ function verifyShopifyWebhook(rawBodyBuffer, hmacHeader, secret) {
   return crypto.timingSafeEqual(digestBuffer, hmacBuffer);
 }
 
-module.exports = { verifyShopifyWebhook };
+async function resolveShopifyWebhookSecret({
+  shopDomain,
+  merchantId
+} = {}) {
+  const credentials = await resolveShopifyStoreCredentials({
+    shopDomain,
+    merchantId
+  });
+
+  return {
+    source: credentials.source,
+    shop_domain: credentials.shop_domain,
+    merchant_id: credentials.merchant_id,
+    webhook_secret: credentials.webhook_secret || null
+  };
+}
+
+module.exports = {
+  verifyShopifyWebhook,
+  resolveShopifyWebhookSecret
+};

@@ -146,6 +146,7 @@ function isMerchantTrackingBlocked(shipment) {
 function isFallbackShipment(shipment) {
   const selectedCarrier = String(shipment?.selected_carrier || "").toLowerCase();
   const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+
   return Boolean(shipment?.fallback_used) || (
     selectedCarrier &&
     actualCarrier &&
@@ -190,7 +191,19 @@ function matchesPolicyFilter(shipment, policyFilter) {
     return true;
   }
 
-  return getPolicyState(shipment) === normalizedFilter;
+  if (normalizedFilter === "blocked") {
+    return isMerchantTrackingBlocked(shipment);
+  }
+
+  if (normalizedFilter === "fallback") {
+    return isFallbackShipment(shipment);
+  }
+
+  if (normalizedFilter === "ok") {
+    return !isMerchantTrackingBlocked(shipment) && !isFallbackShipment(shipment);
+  }
+
+  return true;
 }
 
 function buildStats(shipments) {
@@ -200,9 +213,11 @@ function buildStats(shipments) {
   const merchantCount = new Set(
     list.map((shipment) => String(shipment.merchant_id || "default"))
   ).size;
-  const policyOk = list.filter((shipment) => getPolicyState(shipment) === "ok").length;
-  const fallbackCount = list.filter((shipment) => getPolicyState(shipment) === "fallback").length;
-  const blockedCount = list.filter((shipment) => getPolicyState(shipment) === "blocked").length;
+  const policyOk = list.filter(
+    (shipment) => !isMerchantTrackingBlocked(shipment) && !isFallbackShipment(shipment)
+  ).length;
+  const fallbackCount = list.filter((shipment) => isFallbackShipment(shipment)).length;
+  const blockedCount = list.filter((shipment) => isMerchantTrackingBlocked(shipment)).length;
   const waitingCount = list.filter((shipment) => isWaitingShipment(shipment)).length;
   const testModeCount = list.filter((shipment) => isDummyTestShipment(shipment)).length;
   const waitingForNextSync = list.filter((shipment) => hasUpcomingSync(shipment)).length;
@@ -1401,7 +1416,7 @@ function renderAdminDashboard({
                 policy: "fallback"
               }),
               tone: "warning",
-              subtitle: "Visa fallback-flöden",
+              subtitle: "Fallback använd",
               isActive: policy === "fallback"
             })}
 

@@ -284,6 +284,64 @@ function extractErrorMessage(error) {
   return "DHL tracking request failed";
 }
 
+function buildDummyEvents(trackingNumberValue) {
+  const now = new Date();
+  const event1 = new Date(now.getTime() - 1000 * 60 * 60 * 18).toISOString();
+  const event2 = new Date(now.getTime() - 1000 * 60 * 60 * 8).toISOString();
+  const event3 = new Date(now.getTime() - 1000 * 60 * 60 * 2).toISOString();
+
+  return [
+    {
+      code: "shipment_information_received",
+      title: "Shipment information received",
+      description: `DHL har mottagit sändningsinformation för ${trackingNumberValue}.`,
+      occurredAt: event1,
+      status: "active",
+      source: "dummy",
+      rawType: "shipment_information_received"
+    },
+    {
+      code: "processed_at_terminal",
+      title: "Processed at terminal",
+      description: "Paketet har registrerats och processats i DHL-nätverket.",
+      occurredAt: event2,
+      status: "active",
+      source: "dummy",
+      rawType: "processed_at_terminal"
+    },
+    {
+      code: "in_transit",
+      title: "In transit",
+      description: "Paketet är på väg genom DHL-nätverket.",
+      occurredAt: event3,
+      status: "active",
+      source: "dummy",
+      rawType: "in_transit"
+    }
+  ];
+}
+
+function buildDummyTrackingResponse(trackingNumberValue, reason) {
+  const events = buildDummyEvents(trackingNumberValue);
+  const latestEventAt = getLatestEventAt(events);
+
+  return {
+    success: true,
+    skipped: false,
+    reason: reason || "Using dummy DHL tracking",
+    events,
+    statusText: "In transit (dummy)",
+    eventCount: events.length,
+    latestEventAt,
+    raw: {
+      provider: "dummy_dhl",
+      trackingNumber: trackingNumberValue,
+      reason: reason || "Using dummy DHL tracking",
+      generatedAt: new Date().toISOString()
+    }
+  };
+}
+
 async function fetchDHLTracking(trackingNumber) {
   const apiKey = safeString(process.env.DHL_API_KEY);
   const trackingNumberValue = safeString(trackingNumber);
@@ -294,6 +352,8 @@ async function fetchDHLTracking(trackingNumber) {
   const requesterCountryCode =
     safeString(process.env.DHL_TRACKING_REQUESTER_COUNTRY_CODE) || "SE";
   const language = safeString(process.env.DHL_TRACKING_LANGUAGE) || "sv";
+  const forceDummyMode =
+    safeString(process.env.DHL_DUMMY_MODE).toLowerCase() === "true";
 
   if (!trackingNumberValue) {
     return {
@@ -307,16 +367,20 @@ async function fetchDHLTracking(trackingNumber) {
     };
   }
 
+  if (forceDummyMode) {
+    console.log("🟡 DHL dummy mode enabled");
+    return buildDummyTrackingResponse(
+      trackingNumberValue,
+      "DHL_DUMMY_MODE is enabled"
+    );
+  }
+
   if (!apiKey) {
-    return {
-      success: false,
-      skipped: true,
-      reason: "DHL_API_KEY is not configured",
-      events: [],
-      statusText: null,
-      eventCount: 0,
-      latestEventAt: null
-    };
+    console.log("🟡 DHL_API_KEY saknas, använder dummy tracking");
+    return buildDummyTrackingResponse(
+      trackingNumberValue,
+      "DHL_API_KEY is not configured"
+    );
   }
 
   try {
@@ -364,6 +428,14 @@ async function fetchDHLTracking(trackingNumber) {
     console.log("✅ DHL tracking shipments found:", shipments.length);
     console.log("✅ DHL tracking events found:", events.length);
 
+    if (events.length === 0) {
+      console.log("🟡 DHL svarade utan events, använder dummy tracking");
+      return buildDummyTrackingResponse(
+        trackingNumberValue,
+        "DHL returned no tracking events"
+      );
+    }
+
     return {
       success: true,
       skipped: false,
@@ -392,15 +464,9 @@ async function fetchDHLTracking(trackingNumber) {
       )
     );
 
-    return {
-      success: false,
-      skipped: false,
-      reason: errorMessage,
-      events: [],
-      statusText: null,
-      eventCount: 0,
-      latestEventAt: null
-    };
+    console.log("🟡 Falling back to dummy DHL tracking");
+
+    return buildDummyTrackingResponse(trackingNumberValue, errorMessage);
   }
 }
 

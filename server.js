@@ -28,7 +28,10 @@ const {
   syncActivePostNordBatch
 } = require("./services/trackingBatchSyncService");
 
-const { runPostNordActiveSyncJob } = require("./services/jobSyncService");
+const {
+  runPostNordActiveSyncJob,
+  runActiveTrackingSyncJob
+} = require("./services/jobSyncService");
 
 const {
   beginOrderProcessing,
@@ -429,7 +432,6 @@ async function isTrackingAllowedForShipment(shipment) {
 
 async function getLiveCarrierTrackingForShipment(shipment) {
   const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
-
   const trackingAllowed = await isTrackingAllowedForShipment(shipment);
 
   if (!trackingAllowed) {
@@ -630,16 +632,12 @@ app.options("/api/rates/preview", (req, res) => {
 app.get("/api/rates/preview", async (req, res) => {
   try {
     setPublicApiCors(res);
-
     const merchantContext = await resolveMerchantContextFromRequest(req);
     const preview = await buildShipOneRatePreview(merchantContext);
-
     return res.status(200).json(preview);
   } catch (error) {
     console.error("Rate preview failed:", error.message);
-
     setPublicApiCors(res);
-
     return res.status(500).json({
       success: false,
       error: "Failed to build ShipOne rate preview"
@@ -663,7 +661,6 @@ app.get("/admin", async (req, res) => {
     );
   } catch (error) {
     console.error("Admin dashboard failed:", error.message);
-
     return res.status(500).send(`
       <html lang="sv">
         <head>
@@ -696,7 +693,6 @@ app.get("/admin/merchants", requireCronSecret, async (req, res) => {
     );
   } catch (error) {
     console.error("Merchant admin page failed:", error.message);
-
     return res.status(500).send(`
       <html lang="sv">
         <head>
@@ -727,7 +723,6 @@ app.post("/admin/merchants/upsert", requireCronSecret, async (req, res) => {
     );
   } catch (error) {
     console.error("Merchant form upsert failed:", error.message);
-
     return res.redirect(
       `/admin/merchants?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent(error.message)}&type=error`
     );
@@ -762,7 +757,6 @@ app.post("/admin/merchants/store/upsert", requireCronSecret, async (req, res) =>
     );
   } catch (error) {
     console.error("Merchant store form upsert failed:", error.message);
-
     return res.redirect(
       `/admin/merchants?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent(error.message)}&type=error`
     );
@@ -783,7 +777,6 @@ app.get("/admin/merchant-carriers", requireCronSecret, async (req, res) => {
     );
   } catch (error) {
     console.error("Merchant carrier settings page failed:", error.message);
-
     return res.status(500).send(`
       <html lang="sv">
         <head>
@@ -819,7 +812,6 @@ app.post("/admin/merchant-carriers/upsert", requireCronSecret, async (req, res) 
     );
   } catch (error) {
     console.error("Merchant carrier setting upsert failed:", error.message);
-
     return res.redirect(
       `/admin/merchant-carriers?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent(error.message)}&type=error`
     );
@@ -853,7 +845,6 @@ app.get("/admin/test/dhl/create", requireCronSecret, async (req, res) => {
     );
   } catch (error) {
     console.error("DHL test shipment create failed:", error.message);
-
     return res.status(500).send(
       renderDHLTestPage({
         token: req.query.token || "",
@@ -886,7 +877,6 @@ app.get("/admin/test/dhl/delete", requireCronSecret, async (req, res) => {
     );
   } catch (error) {
     console.error("DHL test shipment delete failed:", error.message);
-
     return res.status(500).send(
       renderDHLTestPage({
         token: req.query.token || "",
@@ -933,7 +923,6 @@ app.post("/admin/shipment/:orderId/sync", async (req, res) => {
     );
   } catch (error) {
     console.error("Manual admin sync failed:", error.message);
-
     return res.redirect(
       `/admin/shipment/${encodeURIComponent(req.params.orderId)}?sync=error`
     );
@@ -1008,7 +997,6 @@ app.get("/admin/shipment/:orderId", async (req, res) => {
     );
   } catch (error) {
     console.error("Admin shipment details failed:", error.message);
-
     return res.status(500).send(`
       <html lang="sv">
         <head>
@@ -1038,7 +1026,6 @@ app.get("/shipments", async (req, res) => {
     });
   } catch (error) {
     console.error("Failed to read shipments:", error.message);
-
     return res.status(500).json({
       success: false,
       error: "Failed to read shipments"
@@ -1063,7 +1050,6 @@ app.get("/shipments/:orderId", async (req, res) => {
     });
   } catch (error) {
     console.error("Shipment lookup failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: "Shipment lookup failed"
@@ -1073,14 +1059,10 @@ app.get("/shipments/:orderId", async (req, res) => {
 
 app.get("/sync-tracking/:trackingNumber", async (req, res) => {
   try {
-    const result = await syncTrackingByTrackingNumber(
-      req.params.trackingNumber
-    );
-
+    const result = await syncTrackingByTrackingNumber(req.params.trackingNumber);
     return res.status(result.statusCode || 200).json(result);
   } catch (error) {
     console.error("Manual sync failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: "Manual tracking sync failed"
@@ -1091,11 +1073,9 @@ app.get("/sync-tracking/:trackingNumber", async (req, res) => {
 app.get("/sync-tracking/order/:orderId", async (req, res) => {
   try {
     const result = await syncTrackingByOrderId(req.params.orderId);
-
     return res.status(result.statusCode || 200).json(result);
   } catch (error) {
     console.error("Order sync failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: "Order tracking sync failed"
@@ -1114,7 +1094,6 @@ app.get("/sync-tracking/batch/postnord", async (req, res) => {
     return res.json(result);
   } catch (error) {
     console.error("Batch sync failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: "Batch sync failed"
@@ -1132,7 +1111,6 @@ app.get("/sync-tracking/batch/postnord/active", async (req, res) => {
     return res.json(result);
   } catch (error) {
     console.error("Active batch sync failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: "Active batch sync failed"
@@ -1150,10 +1128,26 @@ app.get("/jobs/sync-postnord-active", requireCronSecret, async (req, res) => {
     return res.status(result.success ? 200 : 500).json(result);
   } catch (error) {
     console.error("Job sync failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: "Job execution failed"
+    });
+  }
+});
+
+app.get("/jobs/sync-tracking-active", requireCronSecret, async (req, res) => {
+  try {
+    const result = await runActiveTrackingSyncJob({
+      limit: req.query.limit || 20,
+      maxAgeDays: req.query.maxAgeDays || 30
+    });
+
+    return res.status(result.success ? 200 : 500).json(result);
+  } catch (error) {
+    console.error("Active tracking job sync failed:", error.message);
+    return res.status(500).json({
+      success: false,
+      error: "Active tracking job execution failed"
     });
   }
 });
@@ -1187,7 +1181,6 @@ app.get("/admin/db/migrate-rate-limit", requireCronSecret, async (req, res) => {
     });
   } catch (error) {
     console.error("Migration failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: error.message
@@ -1209,7 +1202,6 @@ app.get("/admin/merchant/upsert", requireCronSecret, async (req, res) => {
     });
   } catch (error) {
     console.error("Merchant upsert failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: error.message
@@ -1254,7 +1246,6 @@ app.get("/admin/shopify-store/upsert", requireCronSecret, async (req, res) => {
     });
   } catch (error) {
     console.error("Shopify store upsert failed:", error.message);
-
     return res.status(500).json({
       success: false,
       error: error.message
@@ -1307,7 +1298,6 @@ app.get("/track/:trackingNumber", async (req, res) => {
     );
   } catch (error) {
     console.error("Tracking lookup failed:", error.message);
-
     return res.status(500).send(renderTrackingErrorPage());
   }
 });

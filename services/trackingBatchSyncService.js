@@ -133,8 +133,32 @@ async function loadCarrierAwareShipments(limit, includeDelivered) {
   return result.rows;
 }
 
-async function loadActiveCarrierAwareShipments(limit, maxAgeDays) {
+async function loadActiveCarrierAwareShipments(
+  limit,
+  maxAgeDays,
+  includeNotDue = false
+) {
   const supportedCarriers = getSupportedBatchCarriers();
+
+  if (includeNotDue) {
+    const result = await query(
+      `
+        SELECT *
+        FROM shipments
+        WHERE actual_carrier = ANY($3::text[])
+          AND tracking_number IS NOT NULL
+          AND status = 'completed'
+          AND created_at >= NOW() - ($2::text || ' days')::interval
+        ORDER BY
+          COALESCE(carrier_next_sync_at, created_at) ASC,
+          id DESC
+        LIMIT $1
+      `,
+      [limit, String(maxAgeDays), supportedCarriers]
+    );
+
+    return result.rows;
+  }
 
   const result = await query(
     `
@@ -207,7 +231,6 @@ async function syncPostNordBatch({ limit = 20, includeDelivered = false } = {}) 
 
   for (const shipment of shipments) {
     const result = await syncPostNordTrackingByOrderId(shipment.order_id);
-
     results.push(buildBatchResultItem(shipment, result));
   }
 
@@ -232,7 +255,6 @@ async function syncActivePostNordBatch({
 
   for (const shipment of shipments) {
     const result = await syncPostNordTrackingByOrderId(shipment.order_id);
-
     results.push(buildBatchResultItem(shipment, result));
   }
 
@@ -252,7 +274,6 @@ async function syncTrackingBatch({ limit = 20, includeDelivered = false } = {}) 
 
   for (const shipment of shipments) {
     const result = await syncTrackingByOrderId(shipment.order_id);
-
     results.push(buildBatchResultItem(shipment, result));
   }
 
@@ -264,26 +285,28 @@ async function syncTrackingBatch({ limit = 20, includeDelivered = false } = {}) 
 
 async function syncActiveTrackingBatch({
   limit = 20,
-  maxAgeDays = 30
+  maxAgeDays = 30,
+  includeNotDue = false
 } = {}) {
   const safeLimit = toSafeLimit(limit, 20, 200);
   const safeMaxAgeDays = toSafeMaxAgeDays(maxAgeDays, 30, 365);
 
   const shipments = await loadActiveCarrierAwareShipments(
     safeLimit,
-    safeMaxAgeDays
+    safeMaxAgeDays,
+    Boolean(includeNotDue)
   );
 
   const results = [];
 
   for (const shipment of shipments) {
     const result = await syncTrackingByOrderId(shipment.order_id);
-
     results.push(buildBatchResultItem(shipment, result));
   }
 
   return buildBatchSummary("active_tracking", results, {
     maxAgeDays: safeMaxAgeDays,
+    includeNotDue: Boolean(includeNotDue),
     supportedCarriers: getSupportedBatchCarriers()
   });
 }

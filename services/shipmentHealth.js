@@ -18,12 +18,12 @@ function toDate(value) {
   }
 }
 
-function diffHours(fromDate, toDate) {
-  if (!fromDate || !toDate) {
+function diffHours(fromDate, toDateValue) {
+  if (!fromDate || !toDateValue) {
     return null;
   }
 
-  return Math.floor((toDate.getTime() - fromDate.getTime()) / 3600000);
+  return Math.floor((toDateValue.getTime() - fromDate.getTime()) / 3600000);
 }
 
 function isWaitingCarrierText(text) {
@@ -44,6 +44,26 @@ function isWaitingCarrierText(text) {
   ].includes(normalized);
 }
 
+function isTrackingBlockedStatus(syncStatus) {
+  const normalized = normalizeText(syncStatus);
+  return normalized === "disabled_by_merchant" || normalized === "disabled";
+}
+
+function isDummyDHLShipment(shipment) {
+  const carrier = normalizeText(shipment?.actual_carrier);
+  const statusText = normalizeText(shipment?.carrier_status_text);
+
+  if (carrier !== "dhl") {
+    return false;
+  }
+
+  return (
+    statusText.includes("(dummy)") ||
+    statusText.includes("dummy") ||
+    statusText.includes("testläge")
+  );
+}
+
 function getHealthBadgeClass(health) {
   if (health === "ok") return "health-ok";
   if (health === "waiting") return "health-waiting";
@@ -52,39 +72,51 @@ function getHealthBadgeClass(health) {
   return "health-neutral";
 }
 
+function buildHealthResult({
+  health,
+  healthLabel,
+  healthCode,
+  healthReason
+}) {
+  return {
+    health,
+    healthLabel,
+    healthCode,
+    healthReason,
+    healthClass: getHealthBadgeClass(health)
+  };
+}
+
 function getWaitingReason(shipment, fallbackUsed) {
   const shipmentStatus = normalizeText(shipment?.status);
   const carrierEventCount = Number(shipment?.carrier_event_count ?? 0);
 
   if (fallbackUsed && shipmentStatus === "completed" && carrierEventCount === 0) {
-    return {
+    return buildHealthResult({
       health: "waiting",
       healthLabel: "Väntar",
       healthCode: "fallback_awaiting_first_event",
       healthReason:
-        "Fallback till faktisk transportör användes korrekt, men första carrier-händelsen har ännu inte registrerats.",
-      healthClass: getHealthBadgeClass("waiting")
-    };
+        "Fallback till faktisk transportör användes korrekt, men första carrier-händelsen har ännu inte registrerats."
+    });
   }
 
   if (fallbackUsed) {
-    return {
+    return buildHealthResult({
       health: "waiting",
       healthLabel: "Väntar",
       healthCode: "fallback_awaiting_progress",
       healthReason:
-        "Fallback till faktisk transportör användes korrekt. Transportören har ännu inte registrerat progression i flödet.",
-      healthClass: getHealthBadgeClass("waiting")
-    };
+        "Fallback till faktisk transportör användes korrekt. Transportören har ännu inte registrerat progression i flödet."
+    });
   }
 
-  return {
+  return buildHealthResult({
     health: "waiting",
     healthLabel: "Väntar",
     healthCode: "awaiting_progress",
-    healthReason: "Transportören har ännu inte registrerat progression i flödet.",
-    healthClass: getHealthBadgeClass("waiting")
-  };
+    healthReason: "Transportören har ännu inte registrerat progression i flödet."
+  });
 }
 
 function getShipmentHealth(shipment) {
@@ -112,44 +144,61 @@ function getShipmentHealth(shipment) {
     Boolean(carrierStatusText);
 
   if (!trackingNumber) {
-    return {
+    return buildHealthResult({
       health: "problem",
       healthLabel: "Problem",
       healthCode: "missing_tracking_number",
-      healthReason: "Trackingnummer saknas på shipment.",
-      healthClass: getHealthBadgeClass("problem")
-    };
+      healthReason: "Trackingnummer saknas på shipment."
+    });
   }
 
   if (shipmentStatus === "failed" || syncStatus === "failed") {
-    return {
+    return buildHealthResult({
       health: "problem",
       healthLabel: "Problem",
       healthCode: "failed_state",
-      healthReason: "Shipment eller tracking-sync är markerad som misslyckad.",
-      healthClass: getHealthBadgeClass("problem")
-    };
+      healthReason: "Shipment eller tracking-sync är markerad som misslyckad."
+    });
+  }
+
+  if (isTrackingBlockedStatus(syncStatus)) {
+    return buildHealthResult({
+      health: "warning",
+      healthLabel: "Blockerad",
+      healthCode: "tracking_blocked_by_policy",
+      healthReason:
+        "Merchant-policy stoppar live tracking för denna carrier. Shipmentet kan fortfarande vara korrekt skapat, men tracking-sync körs inte."
+    });
+  }
+
+  if (isDummyDHLShipment(shipment)) {
+    return buildHealthResult({
+      health: "warning",
+      healthLabel: "Testläge",
+      healthCode: "dhl_dummy_tracking",
+      healthReason:
+        "DHL tracking körs i dummy-läge just nu. Flödet fungerar för test och admin, men riktig DHL API är ännu inte aktiv."
+    });
   }
 
   if (!hasAnySyncData && shipmentStatus === "completed") {
     if (fallbackUsed) {
-      return {
+      return buildHealthResult({
         health: "waiting",
         healthLabel: "Väntar",
         healthCode: "fallback_awaiting_first_sync",
         healthReason:
-          "Fallback till faktisk transportör användes korrekt, men första tracking-sync har ännu inte registrerats.",
-        healthClass: getHealthBadgeClass("waiting")
-      };
+          "Fallback till faktisk transportör användes korrekt, men första tracking-sync har ännu inte registrerats."
+      });
     }
 
-    return {
+    return buildHealthResult({
       health: "waiting",
       healthLabel: "Väntar",
       healthCode: "awaiting_first_sync",
-      healthReason: "Shipmentet är skapat men väntar ännu på första tracking-sync från transportören.",
-      healthClass: getHealthBadgeClass("waiting")
-    };
+      healthReason:
+        "Shipmentet är skapat men väntar ännu på första tracking-sync från transportören."
+    });
   }
 
   if (isWaitingCarrierText(carrierStatusText)) {
@@ -157,94 +206,88 @@ function getShipmentHealth(shipment) {
   }
 
   if (!carrier && syncStatus === "success") {
-    return {
+    return buildHealthResult({
       health: "warning",
       healthLabel: "Varning",
       healthCode: "missing_actual_carrier",
-      healthReason: "actual_carrier saknas trots att shipmentet i övrigt verkar fungera.",
-      healthClass: getHealthBadgeClass("warning")
-    };
+      healthReason:
+        "actual_carrier saknas trots att shipmentet i övrigt verkar fungera."
+    });
   }
 
   if (carrierNextSyncAt && carrierNextSyncAt.getTime() < now.getTime() - 30 * 60 * 1000) {
-    return {
+    return buildHealthResult({
       health: "warning",
       healthLabel: "Varning",
       healthCode: "next_sync_overdue",
-      healthReason: "Nästa sync-tid ligger mer än 30 minuter i det förflutna.",
-      healthClass: getHealthBadgeClass("warning")
-    };
+      healthReason: "Nästa sync-tid ligger mer än 30 minuter i det förflutna."
+    });
   }
 
   if (syncAttempts >= 8 && syncStatus !== "success") {
-    return {
+    return buildHealthResult({
       health: "warning",
       healthLabel: "Varning",
       healthCode: "high_sync_attempts",
-      healthReason: `Många syncförsök registrerade (${syncAttempts}).`,
-      healthClass: getHealthBadgeClass("warning")
-    };
+      healthReason: `Många syncförsök registrerade (${syncAttempts}).`
+    });
   }
 
   if (carrierLastSyncedAt && hoursSinceLastSync !== null && hoursSinceLastSync >= 24) {
-    return {
+    return buildHealthResult({
       health: "warning",
       healthLabel: "Varning",
       healthCode: "stale_sync",
-      healthReason: `Shipmentet har inte synkats på ${hoursSinceLastSync} timmar.`,
-      healthClass: getHealthBadgeClass("warning")
-    };
+      healthReason: `Shipmentet har inte synkats på ${hoursSinceLastSync} timmar.`
+    });
   }
 
   if (syncStatus === "success" && carrierEventCount === 0 && shipmentStatus === "processing") {
     if (fallbackUsed) {
-      return {
+      return buildHealthResult({
         health: "waiting",
         healthLabel: "Väntar",
         healthCode: "fallback_processing_without_events",
         healthReason:
-          "Fallback till faktisk transportör användes korrekt, men shipmentet saknar ännu registrerade carrier-events.",
-        healthClass: getHealthBadgeClass("waiting")
-      };
+          "Fallback till faktisk transportör användes korrekt, men shipmentet saknar ännu registrerade carrier-events."
+      });
     }
 
-    return {
+    return buildHealthResult({
       health: "waiting",
       healthLabel: "Väntar",
       healthCode: "processing_without_events",
-      healthReason: "Shipmentet behandlas men saknar ännu registrerade carrier-events.",
-      healthClass: getHealthBadgeClass("waiting")
-    };
+      healthReason:
+        "Shipmentet behandlas men saknar ännu registrerade carrier-events."
+    });
   }
 
   if (syncStatus === "success" && carrierEventCount === 0 && shipmentStatus === "completed") {
     if (fallbackUsed) {
-      return {
+      return buildHealthResult({
         health: "waiting",
         healthLabel: "Väntar",
         healthCode: "fallback_completed_without_events",
         healthReason:
-          "Fallback till faktisk transportör användes korrekt, men transportören har ännu inte visat någon första händelse.",
-        healthClass: getHealthBadgeClass("waiting")
-      };
+          "Fallback till faktisk transportör användes korrekt, men transportören har ännu inte visat någon första händelse."
+      });
     }
 
-    return {
+    return buildHealthResult({
       health: "waiting",
       healthLabel: "Väntar",
       healthCode: "completed_without_events",
-      healthReason: "Shipmentet är slutfört men transportören har ännu inte visat någon första händelse.",
-      healthClass: getHealthBadgeClass("waiting")
-    };
+      healthReason:
+        "Shipmentet är slutfört men transportören har ännu inte visat någon första händelse."
+    });
   }
 
-  return {
+  return buildHealthResult({
     health: "ok",
     healthLabel: "OK",
     healthCode: "healthy",
-    healthReason: "Shipmentet ser friskt ut och senaste sync-status är normal.",
-    healthClass: getHealthBadgeClass("ok")
-  };
+    healthReason: "Shipmentet ser friskt ut och senaste sync-status är normal."
+  });
 }
 
 function enrichShipmentWithHealth(shipment) {

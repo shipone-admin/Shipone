@@ -1,5 +1,6 @@
 const { query } = require("./db");
 const { fetchPostNordTracking } = require("./postnordTracking");
+const { fetchDHLTracking } = require("./dhlTracking");
 const { saveCarrierTrackingSnapshot } = require("./trackingSyncStore");
 const {
   isTrackingCarrierEnabledForMerchant
@@ -13,6 +14,20 @@ function normalizeOrderId(value) {
 function normalizeTrackingNumber(value) {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function normalizeCarrier(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getCarrierLabel(carrier) {
+  const normalized = normalizeCarrier(carrier);
+
+  if (normalized === "postnord") return "PostNord";
+  if (normalized === "dhl") return "DHL";
+  if (normalized === "budbee") return "Budbee";
+
+  return carrier || "carrier";
 }
 
 async function findShipmentByOrderId(orderId) {
@@ -72,10 +87,10 @@ async function reloadShipmentById(id) {
 
 async function markTrackingDisabledForShipment(shipment, reason) {
   if (!shipment?.id) {
-    return null;
+    return;
   }
 
-  const result = await query(
+  await query(
     `
       UPDATE shipments
       SET
@@ -84,32 +99,27 @@ async function markTrackingDisabledForShipment(shipment, reason) {
         carrier_next_sync_at = NULL,
         updated_at = NOW()
       WHERE id = $1
-      RETURNING *
     `,
     [shipment.id, reason || "disabled_by_merchant"]
   );
-
-  return result.rows[0] || null;
 }
 
-async function canSyncPostNordTrackingForShipment(shipment) {
+async function canSyncTrackingForShipment(shipment) {
   if (!shipment) {
     return {
       allowed: false,
       statusCode: 404,
-      error: "Shipment not found",
-      skipReason: null
+      error: "Shipment not found"
     };
   }
 
-  const actualCarrier = String(shipment.actual_carrier || "").toLowerCase();
+  const actualCarrier = normalizeCarrier(shipment.actual_carrier);
 
-  if (actualCarrier !== "postnord") {
+  if (!actualCarrier) {
     return {
       allowed: false,
       statusCode: 400,
-      error: "Tracking sync only supports PostNord shipments",
-      skipReason: null
+      error: "Shipment is missing actual carrier"
     };
   }
 
@@ -117,8 +127,15 @@ async function canSyncPostNordTrackingForShipment(shipment) {
     return {
       allowed: false,
       statusCode: 400,
-      error: "Shipment is missing tracking number",
-      skipReason: null
+      error: "Shipment is missing tracking number"
+    };
+  }
+
+  if (!["postnord", "dhl"].includes(actualCarrier)) {
+    return {
+      allowed: false,
+      statusCode: 400,
+      error: `Tracking sync does not support carrier ${actualCarrier}`
     };
   }
 
@@ -128,57 +145,62 @@ async function canSyncPostNordTrackingForShipment(shipment) {
 
   const trackingEnabled = await isTrackingCarrierEnabledForMerchant(
     merchantId,
-    "postnord"
+    actualCarrier
   );
 
   if (!trackingEnabled) {
     return {
       allowed: false,
       statusCode: 403,
-      error: `Tracking is disabled for merchant ${merchantId} and carrier postnord`,
-      skipReason: "disabled_by_merchant"
+      error: `Tracking is disabled for merchant ${merchantId} and carrier ${actualCarrier}`,
+      skipReason: "disabled_by_merchant",
+      carrier: actualCarrier
     };
   }
 
   return {
     allowed: true,
     statusCode: 200,
-    error: null,
-    skipReason: null
+    carrier: actualCarrier
+  };
+}
+
+async function fetchCarrierTracking(shipment) {
+  const actualCarrier = normalizeCarrier(shipment?.actual_carrier);
+
+  if (actualCarrier === "postnord") {
+    return fetchPostNordTracking(shipment.tracking_number);
+  }
+
+  if (actualCarrier === "dhl") {
+    return fetchDHLTracking(shipment.tracking_number);
+  }
+
+  return {
+    success: false,
+    error: `Unsupported carrier for tracking fetch: ${actualCarrier}`
   };
 }
 
 async function syncShipment(shipment) {
-  const eligibility = await canSyncPostNordTrackingForShipment(shipment);
+  const eligibility = await canSyncTrackingForShipment(shipment);
 
   if (!eligibility.allowed) {
     if (eligibility.statusCode === 403) {
-      const updatedShipment = await markTrackingDisabledForShipment(
-        shipment,
-        eligibility.skipReason || "disabled_by_merchant"
-      );
-
-      return {
-        success: false,
-        skipped: true,
-        skipReason: eligibility.skipReason || "disabled_by_merchant",
-        statusCode: eligibility.statusCode,
-        error: eligibility.error,
-        shipment: updatedShipment || shipment
-      };
+      await markTrackingDisabledForShipment(shipment, "disabled_by_merchant");
     }
 
     return {
       success: false,
-      skipped: false,
-      skipReason: null,
+      skipped: eligibility.statusCode === 403,
+      skipReason: eligibility.skipReason || null,
       statusCode: eligibility.statusCode,
       error: eligibility.error,
       shipment
     };
   }
 
-  const carrierTracking = await fetchPostNordTracking(shipment.tracking_number);
+  const carrierTracking = await fetchCarrierTracking(shipment);
 
   if (!carrierTracking.success) {
     return {
@@ -186,7 +208,9 @@ async function syncShipment(shipment) {
       skipped: false,
       skipReason: null,
       statusCode: 502,
-      error: carrierTracking.error || "PostNord tracking fetch failed",
+      error:
+        carrierTracking.error ||
+        `${getCarrierLabel(eligibility.carrier)} tracking fetch failed`,
       shipment,
       carrierTracking
     };
@@ -207,6 +231,38 @@ async function syncShipment(shipment) {
   };
 }
 
+async function syncTrackingByOrderId(orderId) {
+  const shipment = await findShipmentByOrderId(orderId);
+
+  if (!shipment) {
+    return {
+      success: false,
+      skipped: false,
+      skipReason: null,
+      statusCode: 404,
+      error: "Shipment not found for order id"
+    };
+  }
+
+  return syncShipment(shipment);
+}
+
+async function syncTrackingByTrackingNumber(trackingNumber) {
+  const shipment = await findShipmentByTrackingNumber(trackingNumber);
+
+  if (!shipment) {
+    return {
+      success: false,
+      skipped: false,
+      skipReason: null,
+      statusCode: 404,
+      error: "Shipment not found for tracking number"
+    };
+  }
+
+  return syncShipment(shipment);
+}
+
 async function syncPostNordTrackingByOrderId(orderId) {
   const shipment = await findShipmentByOrderId(orderId);
 
@@ -217,6 +273,18 @@ async function syncPostNordTrackingByOrderId(orderId) {
       skipReason: null,
       statusCode: 404,
       error: "Shipment not found for order id"
+    };
+  }
+
+  const actualCarrier = normalizeCarrier(shipment.actual_carrier);
+
+  if (actualCarrier !== "postnord") {
+    return {
+      success: false,
+      skipped: false,
+      skipReason: null,
+      statusCode: 400,
+      error: `Shipment carrier is ${actualCarrier || "unknown"}, not postnord`
     };
   }
 
@@ -236,10 +304,24 @@ async function syncPostNordTrackingByTrackingNumber(trackingNumber) {
     };
   }
 
+  const actualCarrier = normalizeCarrier(shipment.actual_carrier);
+
+  if (actualCarrier !== "postnord") {
+    return {
+      success: false,
+      skipped: false,
+      skipReason: null,
+      statusCode: 400,
+      error: `Shipment carrier is ${actualCarrier || "unknown"}, not postnord`
+    };
+  }
+
   return syncShipment(shipment);
 }
 
 module.exports = {
+  syncTrackingByTrackingNumber,
+  syncTrackingByOrderId,
   syncPostNordTrackingByTrackingNumber,
   syncPostNordTrackingByOrderId
 };

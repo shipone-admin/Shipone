@@ -223,8 +223,6 @@ function isTrackingBlockedByPolicy(shipment) {
 }
 
 function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
-  const badges = [];
-
   const blockedCount = Number(merchantOverview.blocked_tracking_shipments || 0);
   const fallbackCount = Number(merchantOverview.fallback_shipments || 0);
   const policyOkCount = Number(merchantOverview.policy_ok_shipments || 0);
@@ -234,41 +232,36 @@ function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
   const fallbackUsed = Boolean(shipment?.fallback_used);
   const blocked = isTrackingBlockedByPolicy(shipment);
 
-  if (blockedCount > 0) {
-    badges.push({
-      className: "reason-badge-danger",
+  return [
+    {
+      className: blockedCount > 0 ? "reason-badge-danger" : "reason-badge-neutral",
       title: "Tracking blockerade",
-      text: `${actualCarrier} tracking avstängd för merchant`
-    });
-  }
-
-  if (fallbackCount > 0) {
-    badges.push({
-      className: "reason-badge-warning",
+      text:
+        blockedCount > 0
+          ? blocked
+            ? `${actualCarrier} tracking avstängd för merchant`
+            : `Det finns ${blockedCount} blockerade tracking-flöden för denna merchant`
+          : "Inga tracking-blockeringar finns just nu"
+    },
+    {
+      className: fallbackCount > 0 ? "reason-badge-warning" : "reason-badge-neutral",
       title: "Fallback",
-      text: fallbackUsed
-        ? `Vald carrier ${selectedCarrier} föll tillbaka till ${actualCarrier}`
-        : "Merchanten har fallback-flöden i andra shipments"
-    });
-  }
-
-  if (policyOkCount > 0) {
-    badges.push({
-      className: "reason-badge-success",
+      text:
+        fallbackCount > 0
+          ? fallbackUsed
+            ? `Vald carrier ${selectedCarrier} föll tillbaka till ${actualCarrier}`
+            : "Merchanten har fallback-flöden i andra shipments"
+          : "Inga fallback-flöden finns just nu"
+    },
+    {
+      className: policyOkCount > 0 ? "reason-badge-success" : "reason-badge-neutral",
       title: "Policy OK",
-      text: "Det finns shipments utan block eller fallback"
-    });
-  }
-
-  if (badges.length === 0) {
-    badges.push({
-      className: "reason-badge-neutral",
-      title: "Översikt",
-      text: "Ingen extra policyförklaring tillgänglig ännu"
-    });
-  }
-
-  return badges;
+      text:
+        policyOkCount > 0
+          ? "Det finns shipments utan block eller fallback"
+          : "Inga policy-ok shipments just nu"
+    }
+  ];
 }
 
 function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {

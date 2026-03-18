@@ -17,6 +17,8 @@ const { getDisplayStatus } = require("./services/trackingStatus");
 const { saveCarrierTrackingSnapshot } = require("./services/trackingSyncStore");
 
 const {
+  syncTrackingByTrackingNumber,
+  syncTrackingByOrderId,
   syncPostNordTrackingByTrackingNumber,
   syncPostNordTrackingByOrderId
 } = require("./services/trackingSyncService");
@@ -111,9 +113,40 @@ function normalizeAdminFilters(queryParams) {
     status: String(queryParams.status || "").trim().toLowerCase(),
     carrier: String(queryParams.carrier || "").trim().toLowerCase(),
     health: String(queryParams.health || "").trim().toLowerCase(),
-    merchant: String(queryParams.merchant || "").trim().toLowerCase(),
-    policy: String(queryParams.policy || "").trim().toLowerCase()
+    policy: String(queryParams.policy || "").trim().toLowerCase(),
+    merchant: String(queryParams.merchant || "").trim().toLowerCase()
   };
+}
+
+function isTrackingBlockedByPolicy(shipment) {
+  const syncStatus = String(shipment?.carrier_last_sync_status || "").toLowerCase();
+  return syncStatus === "disabled_by_merchant" || syncStatus === "disabled";
+}
+
+function matchesPolicyFilter(shipment, policyFilter) {
+  const normalized = String(policyFilter || "").toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  const blocked = isTrackingBlockedByPolicy(shipment);
+  const fallback = Boolean(shipment?.fallback_used);
+  const policyOk = !blocked && !fallback;
+
+  if (normalized === "blocked") {
+    return blocked;
+  }
+
+  if (normalized === "fallback") {
+    return fallback;
+  }
+
+  if (normalized === "ok") {
+    return policyOk;
+  }
+
+  return true;
 }
 
 function matchesAdminFilters(shipment, filters) {
@@ -153,37 +186,8 @@ function matchesAdminFilters(shipment, filters) {
     }
   }
 
-  if (filters.policy) {
-    const carrierLastSyncStatus = String(
-      shipment.carrier_last_sync_status || ""
-    ).toLowerCase();
-
-    const fallbackUsed = Boolean(shipment.fallback_used);
-
-    if (filters.policy === "blocked") {
-      if (
-        carrierLastSyncStatus !== "disabled_by_merchant" &&
-        carrierLastSyncStatus !== "disabled"
-      ) {
-        return false;
-      }
-    }
-
-    if (filters.policy === "fallback") {
-      if (!fallbackUsed) {
-        return false;
-      }
-    }
-
-    if (filters.policy === "ok") {
-      const isBlocked =
-        carrierLastSyncStatus === "disabled_by_merchant" ||
-        carrierLastSyncStatus === "disabled";
-
-      if (isBlocked || fallbackUsed) {
-        return false;
-      }
-    }
+  if (!matchesPolicyFilter(shipment, filters.policy)) {
+    return false;
   }
 
   return true;
@@ -479,39 +483,6 @@ async function resolveMerchantContextFromRequest(req) {
     shopDomain,
     defaultMerchantId
   });
-}
-
-async function getMerchantShipmentOverview(merchantId) {
-  const safeMerchantId = normalizeMerchantId(merchantId);
-
-  const result = await query(
-    `
-      SELECT
-        COUNT(*)::int AS total_shipments,
-        COUNT(*) FILTER (
-          WHERE COALESCE(fallback_used, false) = true
-        )::int AS fallback_shipments,
-        COUNT(*) FILTER (
-          WHERE LOWER(COALESCE(carrier_last_sync_status, '')) IN ('disabled_by_merchant', 'disabled')
-        )::int AS blocked_tracking_shipments,
-        COUNT(*) FILTER (
-          WHERE COALESCE(fallback_used, false) = false
-            AND LOWER(COALESCE(carrier_last_sync_status, '')) NOT IN ('disabled_by_merchant', 'disabled')
-        )::int AS policy_ok_shipments
-      FROM shipments
-      WHERE LOWER(COALESCE(merchant_id, 'default')) = $1
-    `,
-    [safeMerchantId]
-  );
-
-  return (
-    result.rows[0] || {
-      total_shipments: 0,
-      fallback_shipments: 0,
-      blocked_tracking_shipments: 0,
-      policy_ok_shipments: 0
-    }
-  );
 }
 
 function renderDHLTestPage({
@@ -943,7 +914,7 @@ app.post("/admin/shipment/:orderId/sync", async (req, res) => {
       );
     }
 
-    const result = await syncPostNordTrackingByOrderId(req.params.orderId);
+    const result = await syncTrackingByOrderId(req.params.orderId);
 
     if (!result.success) {
       if (result.statusCode === 403) {
@@ -1000,13 +971,31 @@ app.get("/admin/shipment/:orderId", async (req, res) => {
       }
     }
 
+    const allMerchantShipments = await getRecentShipments(500);
+    const sameMerchantShipments = allMerchantShipments.filter(
+      (item) =>
+        String(item.merchant_id || "").toLowerCase() ===
+        String(shipment.merchant_id || "").toLowerCase()
+    );
+
+    const merchantOverview = {
+      total_shipments: sameMerchantShipments.length,
+      fallback_shipments: sameMerchantShipments.filter((item) => item.fallback_used).length,
+      blocked_tracking_shipments: sameMerchantShipments.filter((item) =>
+        isTrackingBlockedByPolicy(item)
+      ).length,
+      policy_ok_shipments: sameMerchantShipments.filter((item) => {
+        const blocked = isTrackingBlockedByPolicy(item);
+        const fallback = Boolean(item.fallback_used);
+        return !blocked && !fallback;
+      }).length
+    };
+
     const events = buildTrackingEvents({
       shipment,
       externalEvents: carrierTracking.events || [],
       externalSource: shipment.actual_carrier || "carrier"
     });
-
-    const merchantOverview = await getMerchantShipmentOverview(shipment.merchant_id);
 
     return res.status(200).send(
       renderAdminShipmentDetails({
@@ -1084,7 +1073,7 @@ app.get("/shipments/:orderId", async (req, res) => {
 
 app.get("/sync-tracking/:trackingNumber", async (req, res) => {
   try {
-    const result = await syncPostNordTrackingByTrackingNumber(
+    const result = await syncTrackingByTrackingNumber(
       req.params.trackingNumber
     );
 
@@ -1101,7 +1090,7 @@ app.get("/sync-tracking/:trackingNumber", async (req, res) => {
 
 app.get("/sync-tracking/order/:orderId", async (req, res) => {
   try {
-    const result = await syncPostNordTrackingByOrderId(req.params.orderId);
+    const result = await syncTrackingByOrderId(req.params.orderId);
 
     return res.status(result.statusCode || 200).json(result);
   } catch (error) {

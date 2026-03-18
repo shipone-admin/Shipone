@@ -223,6 +223,7 @@ function isTrackingBlockedByPolicy(shipment) {
 }
 
 function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
+  const merchantId = encodeURIComponent(shipment?.merchant_id || "default");
   const blockedCount = Number(merchantOverview.blocked_tracking_shipments || 0);
   const fallbackCount = Number(merchantOverview.fallback_shipments || 0);
   const policyOkCount = Number(merchantOverview.policy_ok_shipments || 0);
@@ -234,6 +235,7 @@ function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
 
   return [
     {
+      href: `/admin?merchant=${merchantId}&policy=blocked`,
       className: blockedCount > 0 ? "reason-badge-danger" : "reason-badge-neutral",
       title: "Tracking blockerade",
       text:
@@ -244,6 +246,7 @@ function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
           : "Inga tracking-blockeringar finns just nu"
     },
     {
+      href: `/admin?merchant=${merchantId}&policy=fallback`,
       className: fallbackCount > 0 ? "reason-badge-warning" : "reason-badge-neutral",
       title: "Fallback",
       text:
@@ -254,6 +257,7 @@ function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
           : "Inga fallback-flöden finns just nu"
     },
     {
+      href: `/admin?merchant=${merchantId}&policy=ok`,
       className: policyOkCount > 0 ? "reason-badge-success" : "reason-badge-neutral",
       title: "Policy OK",
       text:
@@ -265,12 +269,11 @@ function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
 }
 
 function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {
-  const merchantId = escapeHtml(shipment?.merchant_id || "default");
+  const merchantIdText = escapeHtml(shipment?.merchant_id || "default");
   const shopDomain = escapeHtml(shipment?.shop_domain || "-");
 
-  const baseAdminUrl = `/admin?merchant=${encodeURIComponent(
-    shipment?.merchant_id || "default"
-  )}`;
+  const merchantId = encodeURIComponent(shipment?.merchant_id || "default");
+  const baseAdminUrl = `/admin?merchant=${merchantId}`;
 
   const badges = buildMerchantReasonBadges(shipment, merchantOverview);
 
@@ -281,7 +284,7 @@ function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {
       <div class="info-list" style="margin-bottom: 18px;">
         <div class="info-row">
           <div class="label">Merchant ID</div>
-          <div class="value">${merchantId}</div>
+          <div class="value">${merchantIdText}</div>
         </div>
 
         <div class="info-row">
@@ -324,10 +327,12 @@ function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {
         ${badges
           .map(
             (badge) => `
-              <div class="reason-badge ${escapeHtml(badge.className)}">
-                <div class="reason-badge-title">${escapeHtml(badge.title)}</div>
-                <div class="reason-badge-text">${escapeHtml(badge.text)}</div>
-              </div>
+              <a class="reason-badge-link" href="${escapeHtml(badge.href)}">
+                <div class="reason-badge ${escapeHtml(badge.className)}">
+                  <div class="reason-badge-title">${escapeHtml(badge.title)}</div>
+                  <div class="reason-badge-text">${escapeHtml(badge.text)}</div>
+                </div>
+              </a>
             `
           )
           .join("")}
@@ -1010,11 +1015,23 @@ function renderAdminShipmentDetails({
           margin-top: 16px;
         }
 
+        .reason-badge-link {
+          text-decoration: none;
+          color: inherit;
+          display: block;
+        }
+
+        .reason-badge-link:hover .reason-badge {
+          transform: translateY(-1px);
+          box-shadow: 0 10px 22px rgba(15, 23, 42, 0.07);
+        }
+
         .reason-badge {
           border-radius: 16px;
           padding: 14px;
           border: 1px solid #e2e8f0;
           background: #f8fafc;
+          transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
         }
 
         .reason-badge-title {

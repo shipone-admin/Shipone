@@ -35,9 +35,10 @@ function mapDHLEventStatus(statusCode, statusText, descriptionText) {
 
   if (
     combined.includes("delivered") ||
-    combined.includes("delivery") && combined.includes("successful") ||
+    (combined.includes("delivery") && combined.includes("successful")) ||
     combined.includes("signed") ||
-    combined.includes("completed")
+    combined.includes("completed") ||
+    combined.includes("picked up by receiver")
   ) {
     return "done";
   }
@@ -48,7 +49,7 @@ function mapDHLEventStatus(statusCode, statusText, descriptionText) {
     combined.includes("failed") ||
     combined.includes("return") ||
     combined.includes("undeliverable") ||
-    combined.includes("customs") && combined.includes("hold")
+    (combined.includes("customs") && combined.includes("hold"))
   ) {
     return "failed";
   }
@@ -221,19 +222,27 @@ function normalizeDHLShipmentEvents(shipment) {
 function extractTopLevelStatus(shipment) {
   const status = shipment?.status;
 
-  if (!status || typeof status !== "object") {
+  if (!status) {
     return null;
   }
 
-  const candidates = [
-    status?.description,
-    status?.status,
-    status?.remark,
-    status?.statusCode
-  ];
+  if (typeof status === "string") {
+    return safeString(status) || null;
+  }
 
-  const value = safeString(candidates.find(Boolean));
-  return value || null;
+  if (typeof status === "object") {
+    const candidates = [
+      status?.description,
+      status?.status,
+      status?.remark,
+      status?.statusCode
+    ];
+
+    const value = safeString(candidates.find(Boolean));
+    return value || null;
+  }
+
+  return null;
 }
 
 function getLatestEventAt(events) {
@@ -249,10 +258,42 @@ function getLatestEventAt(events) {
   return timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
 }
 
+function extractErrorMessage(error) {
+  const apiData = error?.response?.data;
+
+  if (typeof apiData === "string" && apiData.trim()) {
+    return apiData.trim();
+  }
+
+  if (apiData?.detail) {
+    return safeString(apiData.detail);
+  }
+
+  if (apiData?.title) {
+    return safeString(apiData.title);
+  }
+
+  if (apiData?.message) {
+    return safeString(apiData.message);
+  }
+
+  if (error?.message) {
+    return safeString(error.message);
+  }
+
+  return "DHL tracking request failed";
+}
+
 async function fetchDHLTracking(trackingNumber) {
   const apiKey = safeString(process.env.DHL_API_KEY);
   const trackingNumberValue = safeString(trackingNumber);
-  const service = safeString(process.env.DHL_TRACKING_SERVICE);
+
+  const configuredService = safeString(process.env.DHL_TRACKING_SERVICE);
+  const service = configuredService || "freight";
+
+  const requesterCountryCode =
+    safeString(process.env.DHL_TRACKING_REQUESTER_COUNTRY_CODE) || "SE";
+  const language = safeString(process.env.DHL_TRACKING_LANGUAGE) || "sv";
 
   if (!trackingNumberValue) {
     return {
@@ -280,12 +321,25 @@ async function fetchDHLTracking(trackingNumber) {
 
   try {
     const params = {
-      trackingNumber: trackingNumberValue
+      trackingNumber: trackingNumberValue,
+      service,
+      requesterCountryCode,
+      language
     };
 
-    if (service) {
-      params.service = service;
-    }
+    console.log("📡 DHL tracking request params:");
+    console.log(
+      JSON.stringify(
+        {
+          trackingNumber: trackingNumberValue,
+          service,
+          requesterCountryCode,
+          language
+        },
+        null,
+        2
+      )
+    );
 
     const response = await axios.get(DEFAULT_DHL_TRACKING_URL, {
       params,
@@ -300,8 +354,15 @@ async function fetchDHLTracking(trackingNumber) {
     const shipments = extractShipments(data);
     const primaryShipment = shipments[0] || {};
     const events = normalizeDHLShipmentEvents(primaryShipment);
-    const statusText = extractTopLevelStatus(primaryShipment);
+    const statusText =
+      extractTopLevelStatus(primaryShipment) ||
+      safeString(primaryShipment?.status?.description) ||
+      null;
     const latestEventAt = getLatestEventAt(events);
+
+    console.log("✅ DHL tracking response status:", response.status);
+    console.log("✅ DHL tracking shipments found:", shipments.length);
+    console.log("✅ DHL tracking events found:", events.length);
 
     return {
       success: true,
@@ -314,10 +375,27 @@ async function fetchDHLTracking(trackingNumber) {
       raw: data
     };
   } catch (error) {
+    const errorMessage = extractErrorMessage(error);
+
+    console.log("❌ DHL tracking failed");
+    console.log(
+      JSON.stringify(
+        {
+          trackingNumber: trackingNumberValue,
+          service,
+          status: error?.response?.status || null,
+          error: errorMessage,
+          data: error?.response?.data || null
+        },
+        null,
+        2
+      )
+    );
+
     return {
       success: false,
       skipped: false,
-      reason: error.response?.data || error.message || "DHL tracking request failed",
+      reason: errorMessage,
       events: [],
       statusText: null,
       eventCount: 0,

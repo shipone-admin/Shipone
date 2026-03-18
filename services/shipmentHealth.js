@@ -119,6 +119,50 @@ function getWaitingReason(shipment, fallbackUsed) {
   });
 }
 
+function hasFirstSyncMissingState(shipment) {
+  const shipmentStatus = normalizeText(shipment?.status);
+  const syncStatus = normalizeText(shipment?.carrier_last_sync_status);
+  const carrierStatusText = normalizeText(shipment?.carrier_status_text);
+  const carrierEventCount = Number(shipment?.carrier_event_count ?? 0);
+  const carrierLastSyncedAt = toDate(shipment?.carrier_last_synced_at);
+
+  if (shipmentStatus !== "completed" && shipmentStatus !== "processing") {
+    return false;
+  }
+
+  if (syncStatus) {
+    return false;
+  }
+
+  if (carrierStatusText) {
+    return false;
+  }
+
+  if (carrierEventCount > 0) {
+    return false;
+  }
+
+  if (carrierLastSyncedAt) {
+    return false;
+  }
+
+  return true;
+}
+
+function hasMeaningfulSyncBaseline(shipment) {
+  const syncStatus = normalizeText(shipment?.carrier_last_sync_status);
+  const carrierStatusText = normalizeText(shipment?.carrier_status_text);
+  const carrierEventCount = Number(shipment?.carrier_event_count ?? 0);
+  const carrierLastSyncedAt = toDate(shipment?.carrier_last_synced_at);
+
+  return (
+    Boolean(syncStatus) ||
+    Boolean(carrierStatusText) ||
+    carrierEventCount > 0 ||
+    Boolean(carrierLastSyncedAt)
+  );
+}
+
 function getShipmentHealth(shipment) {
   const now = new Date();
 
@@ -142,6 +186,8 @@ function getShipmentHealth(shipment) {
     Boolean(carrierNextSyncAt) ||
     carrierEventCount > 0 ||
     Boolean(carrierStatusText);
+
+  const hasSyncBaseline = hasMeaningfulSyncBaseline(shipment);
 
   if (!trackingNumber) {
     return buildHealthResult({
@@ -181,6 +227,26 @@ function getShipmentHealth(shipment) {
     });
   }
 
+  if (hasFirstSyncMissingState(shipment)) {
+    if (fallbackUsed) {
+      return buildHealthResult({
+        health: "waiting",
+        healthLabel: "Väntar",
+        healthCode: "fallback_awaiting_first_sync",
+        healthReason:
+          "Fallback till faktisk transportör användes korrekt, men första tracking-sync har ännu inte registrerats."
+      });
+    }
+
+    return buildHealthResult({
+      health: "waiting",
+      healthLabel: "Väntar",
+      healthCode: "awaiting_first_sync",
+      healthReason:
+        "Shipmentet väntar ännu på första tracking-sync från transportören."
+    });
+  }
+
   if (!hasAnySyncData && shipmentStatus === "completed") {
     if (fallbackUsed) {
       return buildHealthResult({
@@ -215,7 +281,11 @@ function getShipmentHealth(shipment) {
     });
   }
 
-  if (carrierNextSyncAt && carrierNextSyncAt.getTime() < now.getTime() - 30 * 60 * 1000) {
+  if (
+    hasSyncBaseline &&
+    carrierNextSyncAt &&
+    carrierNextSyncAt.getTime() < now.getTime() - 30 * 60 * 1000
+  ) {
     return buildHealthResult({
       health: "warning",
       healthLabel: "Varning",

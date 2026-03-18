@@ -47,14 +47,16 @@ async function runPostNordActiveSyncJob({
 
 async function runActiveTrackingSyncJob({
   limit = 20,
-  maxAgeDays = 30
+  maxAgeDays = 30,
+  includeNotDue = false
 } = {}) {
   const startedAt = new Date().toISOString();
 
   try {
     const batchResult = await syncActiveTrackingBatch({
       limit,
-      maxAgeDays
+      maxAgeDays,
+      includeNotDue
     });
 
     return {
@@ -68,6 +70,7 @@ async function runActiveTrackingSyncJob({
       skippedByMerchantCount: batchResult.skippedByMerchantCount || 0,
       failureCount: batchResult.failureCount || 0,
       maxAgeDays: batchResult.maxAgeDays,
+      includeNotDue: Boolean(batchResult.includeNotDue),
       supportedCarriers: batchResult.supportedCarriers || [],
       results: batchResult.results || []
     };
@@ -82,6 +85,7 @@ async function runActiveTrackingSyncJob({
       skippedCount: 0,
       skippedByMerchantCount: 0,
       failureCount: 1,
+      includeNotDue: Boolean(includeNotDue),
       error: error.message || "Job failed",
       results: []
     };

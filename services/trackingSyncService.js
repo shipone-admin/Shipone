@@ -20,16 +20,6 @@ function normalizeCarrier(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function getCarrierLabel(carrier) {
-  const normalized = normalizeCarrier(carrier);
-
-  if (normalized === "postnord") return "PostNord";
-  if (normalized === "dhl") return "DHL";
-  if (normalized === "budbee") return "Budbee";
-
-  return carrier || "carrier";
-}
-
 async function findShipmentByOrderId(orderId) {
   const safeOrderId = normalizeOrderId(orderId);
 
@@ -106,6 +96,7 @@ async function markTrackingDisabledForShipment(shipment, reason) {
 
 async function canSyncTrackingForShipment(shipment) {
   if (!shipment) {
+    console.log("❌ syncShipment eligibility failed: shipment missing");
     return {
       allowed: false,
       statusCode: 404,
@@ -115,7 +106,22 @@ async function canSyncTrackingForShipment(shipment) {
 
   const actualCarrier = normalizeCarrier(shipment.actual_carrier);
 
+  console.log("🔎 Sync eligibility check");
+  console.log(
+    JSON.stringify(
+      {
+        order_id: shipment.order_id,
+        merchant_id: shipment.merchant_id,
+        tracking_number: shipment.tracking_number,
+        actual_carrier: shipment.actual_carrier || null
+      },
+      null,
+      2
+    )
+  );
+
   if (!actualCarrier) {
+    console.log("❌ syncShipment eligibility failed: actual carrier missing");
     return {
       allowed: false,
       statusCode: 400,
@@ -124,6 +130,7 @@ async function canSyncTrackingForShipment(shipment) {
   }
 
   if (!shipment.tracking_number) {
+    console.log("❌ syncShipment eligibility failed: tracking number missing");
     return {
       allowed: false,
       statusCode: 400,
@@ -132,6 +139,9 @@ async function canSyncTrackingForShipment(shipment) {
   }
 
   if (!["postnord", "dhl"].includes(actualCarrier)) {
+    console.log(
+      `❌ syncShipment eligibility failed: unsupported carrier ${actualCarrier}`
+    );
     return {
       allowed: false,
       statusCode: 400,
@@ -146,6 +156,10 @@ async function canSyncTrackingForShipment(shipment) {
   const trackingEnabled = await isTrackingCarrierEnabledForMerchant(
     merchantId,
     actualCarrier
+  );
+
+  console.log(
+    `🛂 Tracking policy check merchant=${merchantId} carrier=${actualCarrier} enabled=${trackingEnabled}`
   );
 
   if (!trackingEnabled) {
@@ -168,11 +182,17 @@ async function canSyncTrackingForShipment(shipment) {
 async function fetchCarrierTracking(shipment) {
   const actualCarrier = normalizeCarrier(shipment?.actual_carrier);
 
+  console.log(
+    `📡 fetchCarrierTracking called for carrier=${actualCarrier} tracking=${shipment?.tracking_number || "-"}`
+  );
+
   if (actualCarrier === "postnord") {
+    console.log("📡 Using PostNord tracking fetcher");
     return fetchPostNordTracking(shipment.tracking_number);
   }
 
   if (actualCarrier === "dhl") {
+    console.log("📡 Using DHL tracking fetcher");
     return fetchDHLTracking(shipment.tracking_number);
   }
 
@@ -183,9 +203,17 @@ async function fetchCarrierTracking(shipment) {
 }
 
 async function syncShipment(shipment) {
+  console.log(
+    `🚚 syncShipment start order=${shipment?.order_id || "-"} carrier=${shipment?.actual_carrier || "-"}`
+  );
+
   const eligibility = await canSyncTrackingForShipment(shipment);
 
   if (!eligibility.allowed) {
+    console.log(
+      `⛔ syncShipment blocked status=${eligibility.statusCode} error=${eligibility.error}`
+    );
+
     if (eligibility.statusCode === 403) {
       await markTrackingDisabledForShipment(shipment, "disabled_by_merchant");
     }
@@ -202,7 +230,24 @@ async function syncShipment(shipment) {
 
   const carrierTracking = await fetchCarrierTracking(shipment);
 
+  console.log(
+    "📦 carrierTracking result:",
+    JSON.stringify(
+      {
+        success: carrierTracking?.success || false,
+        skipped: carrierTracking?.skipped || false,
+        reason: carrierTracking?.reason || null,
+        error: carrierTracking?.error || null,
+        statusText: carrierTracking?.statusText || null,
+        eventCount: carrierTracking?.eventCount || 0
+      },
+      null,
+      2
+    )
+  );
+
   if (!carrierTracking.success) {
+    console.log("❌ syncShipment failed before snapshot save");
     return {
       success: false,
       skipped: false,
@@ -210,7 +255,8 @@ async function syncShipment(shipment) {
       statusCode: 502,
       error:
         carrierTracking.error ||
-        `${getCarrierLabel(eligibility.carrier)} tracking fetch failed`,
+        carrierTracking.reason ||
+        "Carrier tracking fetch failed",
       shipment,
       carrierTracking
     };
@@ -219,6 +265,10 @@ async function syncShipment(shipment) {
   await saveCarrierTrackingSnapshot(shipment.id, carrierTracking);
 
   const updatedShipment = await reloadShipmentById(shipment.id);
+
+  console.log(
+    `✅ syncShipment success order=${shipment.order_id} carrier=${eligibility.carrier}`
+  );
 
   return {
     success: true,
@@ -232,9 +282,12 @@ async function syncShipment(shipment) {
 }
 
 async function syncTrackingByOrderId(orderId) {
+  console.log(`🔁 syncTrackingByOrderId called orderId=${orderId}`);
+
   const shipment = await findShipmentByOrderId(orderId);
 
   if (!shipment) {
+    console.log("❌ syncTrackingByOrderId: shipment not found");
     return {
       success: false,
       skipped: false,
@@ -248,9 +301,14 @@ async function syncTrackingByOrderId(orderId) {
 }
 
 async function syncTrackingByTrackingNumber(trackingNumber) {
+  console.log(
+    `🔁 syncTrackingByTrackingNumber called trackingNumber=${trackingNumber}`
+  );
+
   const shipment = await findShipmentByTrackingNumber(trackingNumber);
 
   if (!shipment) {
+    console.log("❌ syncTrackingByTrackingNumber: shipment not found");
     return {
       success: false,
       skipped: false,
@@ -264,6 +322,8 @@ async function syncTrackingByTrackingNumber(trackingNumber) {
 }
 
 async function syncPostNordTrackingByOrderId(orderId) {
+  console.log(`🔁 syncPostNordTrackingByOrderId called orderId=${orderId}`);
+
   const shipment = await findShipmentByOrderId(orderId);
 
   if (!shipment) {
@@ -279,6 +339,9 @@ async function syncPostNordTrackingByOrderId(orderId) {
   const actualCarrier = normalizeCarrier(shipment.actual_carrier);
 
   if (actualCarrier !== "postnord") {
+    console.log(
+      `❌ syncPostNordTrackingByOrderId wrong carrier actual=${actualCarrier}`
+    );
     return {
       success: false,
       skipped: false,
@@ -292,6 +355,10 @@ async function syncPostNordTrackingByOrderId(orderId) {
 }
 
 async function syncPostNordTrackingByTrackingNumber(trackingNumber) {
+  console.log(
+    `🔁 syncPostNordTrackingByTrackingNumber called trackingNumber=${trackingNumber}`
+  );
+
   const shipment = await findShipmentByTrackingNumber(trackingNumber);
 
   if (!shipment) {
@@ -307,6 +374,9 @@ async function syncPostNordTrackingByTrackingNumber(trackingNumber) {
   const actualCarrier = normalizeCarrier(shipment.actual_carrier);
 
   if (actualCarrier !== "postnord") {
+    console.log(
+      `❌ syncPostNordTrackingByTrackingNumber wrong carrier actual=${actualCarrier}`
+    );
     return {
       success: false,
       skipped: false,

@@ -153,6 +153,14 @@ function isFallbackShipment(shipment) {
   );
 }
 
+function isWaitingShipment(shipment) {
+  return String(shipment?.health || "").toLowerCase() === "waiting";
+}
+
+function isDummyTestShipment(shipment) {
+  return String(shipment?.healthCode || "").toLowerCase() === "dhl_dummy_tracking";
+}
+
 function getPolicyState(shipment) {
   if (isMerchantTrackingBlocked(shipment)) {
     return "blocked";
@@ -195,6 +203,8 @@ function buildStats(shipments) {
   const policyOk = list.filter((shipment) => getPolicyState(shipment) === "ok").length;
   const fallbackCount = list.filter((shipment) => getPolicyState(shipment) === "fallback").length;
   const blockedCount = list.filter((shipment) => getPolicyState(shipment) === "blocked").length;
+  const waitingCount = list.filter((shipment) => isWaitingShipment(shipment)).length;
+  const testModeCount = list.filter((shipment) => isDummyTestShipment(shipment)).length;
   const waitingForNextSync = list.filter((shipment) => hasUpcomingSync(shipment)).length;
 
   return {
@@ -203,6 +213,8 @@ function buildStats(shipments) {
     policyOk,
     fallbackCount,
     blockedCount,
+    waitingCount,
+    testModeCount,
     waitingForNextSync
   };
 }
@@ -720,7 +732,7 @@ function renderAdminDashboard({
 
         .stats {
           display: grid;
-          grid-template-columns: repeat(6, minmax(0, 1fr));
+          grid-template-columns: repeat(7, minmax(0, 1fr));
           gap: 16px;
           margin-top: 24px;
         }
@@ -1282,6 +1294,12 @@ function renderAdminDashboard({
           background: #fff;
         }
 
+        @media (max-width: 1500px) {
+          .stats {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+        }
+
         @media (max-width: 1400px) {
           .stats {
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1353,7 +1371,7 @@ function renderAdminDashboard({
                 policy: policy || ""
               }),
               subtitle: "Visa aktuell lista",
-              isActive: !policy
+              isActive: !policy && !health
             })}
 
             ${renderStatCard({
@@ -1400,16 +1418,30 @@ function renderAdminDashboard({
             })}
 
             ${renderStatCard({
-              label: "Väntar på nästa sync",
-              value: String(stats.waitingForNextSync),
+              label: "Väntar",
+              value: String(stats.waitingCount),
               href: buildFilterUrl({
                 ...baseFilters,
                 health: "waiting",
                 policy: policy || ""
               }),
               tone: "info",
-              subtitle: "Planerad sync",
+              subtitle: "Saknar progression eller första sync",
               isActive: health === "waiting"
+            })}
+
+            ${renderStatCard({
+              label: "Testläge",
+              value: String(stats.testModeCount),
+              href: buildFilterUrl({
+                ...baseFilters,
+                health: "warning",
+                carrier: "dhl",
+                policy: policy || ""
+              }),
+              tone: "warning",
+              subtitle: "DHL dummy tracking",
+              isActive: health === "warning" && carrier === "dhl"
             })}
           </div>
         </div>

@@ -54,11 +54,11 @@ function formatShipmentStatus(status) {
 function formatChoice(choice) {
   const normalized = String(choice || "").toUpperCase();
 
-  if (normalized === "FAST") return "Fast";
-  if (normalized === "FASTEST") return "Fast";
-  if (normalized === "CHEAP") return "Cheap";
-  if (normalized === "CHEAPEST") return "Cheap";
-  if (normalized === "GREEN") return "Smart";
+  if (normalized === "FAST") return "Snabb";
+  if (normalized === "FASTEST") return "Snabb";
+  if (normalized === "CHEAP") return "Billig";
+  if (normalized === "CHEAPEST") return "Billig";
+  if (normalized === "GREEN") return "Miljövänlig";
   if (normalized === "SMART") return "Smart";
   if (normalized === "DHL_TEST") return "DHL Test";
 
@@ -102,6 +102,7 @@ function getEventSourceLabel(source) {
   if (source === "dhl") return "DHL";
   if (source === "budbee") return "Budbee";
   if (source === "carrier") return "Transportör";
+  if (source === "dummy") return "Testläge";
   return "ShipOne";
 }
 
@@ -222,6 +223,21 @@ function isTrackingBlockedByPolicy(shipment) {
   return lastSyncStatus === "disabled_by_merchant" || lastSyncStatus === "disabled";
 }
 
+function isFallbackShipment(shipment) {
+  const selectedCarrier = String(shipment?.selected_carrier || "").toLowerCase();
+  const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
+
+  return Boolean(shipment?.fallback_used) || (
+    selectedCarrier &&
+    actualCarrier &&
+    selectedCarrier !== actualCarrier
+  );
+}
+
+function isDummyDhlShipment(shipment) {
+  return String(shipment?.healthCode || "").toLowerCase() === "dhl_dummy_tracking";
+}
+
 function buildMerchantReasonBadges(shipment, merchantOverview = {}) {
   const merchantId = encodeURIComponent(shipment?.merchant_id || "default");
   const blockedCount = Number(merchantOverview.blocked_tracking_shipments || 0);
@@ -336,6 +352,108 @@ function renderMerchantOverviewPanel(shipment, merchantOverview = {}) {
             `
           )
           .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function buildDecisionExplanation(shipment) {
+  const normalizedChoice = String(shipment?.shipone_choice || "").toUpperCase();
+  const selectedCarrier = formatCarrierName(shipment?.selected_carrier || "-");
+  const actualCarrier = formatCarrierName(shipment?.actual_carrier || "-");
+  const selectedService = shipment?.selected_service || "-";
+  const blocked = isTrackingBlockedByPolicy(shipment);
+  const fallbackUsed = isFallbackShipment(shipment);
+  const dummyDhl = isDummyDhlShipment(shipment);
+
+  let primary = "ShipOne gjorde ett automatiskt val baserat på tillgänglig orderdata.";
+  let secondary = `Vald carrier var ${selectedCarrier} med tjänsten ${selectedService}.`;
+
+  if (normalizedChoice === "FAST" || normalizedChoice === "FASTEST") {
+    primary = "ShipOne prioriterade snabbare leverans framför lägsta kostnad.";
+  }
+
+  if (normalizedChoice === "CHEAP" || normalizedChoice === "CHEAPEST") {
+    primary = "ShipOne prioriterade lägsta rimliga fraktkostnad för ordern.";
+  }
+
+  if (normalizedChoice === "GREEN") {
+    primary = "ShipOne prioriterade ett mer hållbart fraktval enligt vald strategi.";
+  }
+
+  if (normalizedChoice === "SMART") {
+    primary = "ShipOne balanserade pris, leveranstid och regler i ett automatiskt standardval.";
+  }
+
+  if (normalizedChoice === "DHL_TEST") {
+    primary = "ShipOne kör DHL i testläge för att validera flödet innan live-DHL är helt aktivt.";
+    secondary = "Detta shipment används för att verifiera att routing, tracking och admin fungerar som tänkt.";
+  }
+
+  if (fallbackUsed) {
+    secondary = `Det slutliga utfallet blev ${actualCarrier} i stället för ${selectedCarrier}, vilket betyder att ShipOne använde fallback för att ordern ändå skulle kunna hanteras.`;
+  }
+
+  if (blocked) {
+    secondary += " Tracking för aktuell carrier är blockerad av merchant-policy, så live-sync stoppas även om shipmentet i sig kan vara korrekt skapat.";
+  }
+
+  if (dummyDhl) {
+    secondary += " Tracking-events kommer just nu från dummy/testläge och inte från live-DHL API.";
+  }
+
+  return {
+    primary,
+    secondary
+  };
+}
+
+function renderDecisionPanel(shipment) {
+  const explanation = buildDecisionExplanation(shipment);
+  const selectedCarrier = escapeHtml(formatCarrierName(shipment?.selected_carrier || "-"));
+  const actualCarrier = escapeHtml(formatCarrierName(shipment?.actual_carrier || "-"));
+  const selectedService = escapeHtml(shipment?.selected_service || "-");
+  const choice = escapeHtml(formatChoice(shipment?.shipone_choice || "-"));
+  const fallbackUsed = isFallbackShipment(shipment);
+  const blocked = isTrackingBlockedByPolicy(shipment);
+
+  return `
+    <div class="card full-width">
+      <h2 class="card-title">Varför valde ShipOne detta?</h2>
+
+      <div class="decision-panel">
+        <div class="decision-main">
+          <div class="decision-choice">ShipOne val: ${choice}</div>
+          <div class="decision-primary">${escapeHtml(explanation.primary)}</div>
+          <div class="decision-secondary">${escapeHtml(explanation.secondary)}</div>
+        </div>
+
+        <div class="decision-facts">
+          <div class="decision-fact">
+            <div class="decision-fact-label">Vald carrier</div>
+            <div class="decision-fact-value">${selectedCarrier}</div>
+          </div>
+
+          <div class="decision-fact">
+            <div class="decision-fact-label">Vald tjänst</div>
+            <div class="decision-fact-value">${selectedService}</div>
+          </div>
+
+          <div class="decision-fact">
+            <div class="decision-fact-label">Faktisk carrier</div>
+            <div class="decision-fact-value">${actualCarrier}</div>
+          </div>
+
+          <div class="decision-fact">
+            <div class="decision-fact-label">Fallback</div>
+            <div class="decision-fact-value">${fallbackUsed ? "Ja" : "Nej"}</div>
+          </div>
+
+          <div class="decision-fact">
+            <div class="decision-fact-label">Tracking tillåten</div>
+            <div class="decision-fact-value">${blocked ? "Nej" : "Ja"}</div>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -636,6 +754,7 @@ function renderAdminShipmentDetails({
     ? escapeHtml(carrierTracking.statusText)
     : escapeHtml(enrichedShipment.carrier_status_text || "-");
   const trackingBlocked = isTrackingBlockedByPolicy(enrichedShipment);
+  const dummyDhl = isDummyDhlShipment(enrichedShipment);
 
   return `
     <!DOCTYPE html>
@@ -747,7 +866,21 @@ function renderAdminShipmentDetails({
           color: var(--muted);
           font-size: 17px;
           line-height: 1.6;
-          max-width: 820px;
+          max-width: 860px;
+        }
+
+        .hero-note {
+          margin-top: 16px;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 14px;
+          background: #eef4ff;
+          border: 1px solid #dbeafe;
+          border-radius: 999px;
+          color: var(--brand-dark);
+          font-size: 13px;
+          font-weight: 700;
         }
 
         .hero-meta {
@@ -910,6 +1043,68 @@ function renderAdminShipmentDetails({
 
         .value strong {
           font-size: 17px;
+        }
+
+        .decision-panel {
+          display: grid;
+          grid-template-columns: 1.4fr 1fr;
+          gap: 18px;
+        }
+
+        .decision-main {
+          border: 1px solid #dbeafe;
+          background: #f8fbff;
+          border-radius: 18px;
+          padding: 18px;
+        }
+
+        .decision-choice {
+          font-size: 13px;
+          color: var(--brand-dark);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 800;
+          margin-bottom: 12px;
+        }
+
+        .decision-primary {
+          font-size: 22px;
+          line-height: 1.35;
+          font-weight: 800;
+          margin-bottom: 10px;
+        }
+
+        .decision-secondary {
+          font-size: 15px;
+          line-height: 1.7;
+          color: var(--muted);
+        }
+
+        .decision-facts {
+          display: grid;
+          gap: 12px;
+        }
+
+        .decision-fact {
+          border: 1px solid #e5edf7;
+          background: #ffffff;
+          border-radius: 16px;
+          padding: 14px;
+        }
+
+        .decision-fact-label {
+          font-size: 12px;
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-weight: 700;
+          margin-bottom: 6px;
+        }
+
+        .decision-fact-value {
+          font-size: 18px;
+          line-height: 1.35;
+          font-weight: 800;
         }
 
         .routing-grid {
@@ -1241,7 +1436,8 @@ function renderAdminShipmentDetails({
         @media (max-width: 1120px) {
           .routing-grid,
           .merchant-overview-grid,
-          .reason-badges {
+          .reason-badges,
+          .decision-panel {
             grid-template-columns: 1fr 1fr;
           }
         }
@@ -1264,7 +1460,8 @@ function renderAdminShipmentDetails({
 
           .routing-grid,
           .merchant-overview-grid,
-          .reason-badges {
+          .reason-badges,
+          .decision-panel {
             grid-template-columns: 1fr;
           }
         }
@@ -1284,8 +1481,14 @@ function renderAdminShipmentDetails({
         <div class="hero">
           <h1>${orderName}</h1>
           <p class="subtitle">
-            Detaljsida för shipment i ShipOne admin. Här ser du orderdata, carrier-status, sync-data och full timeline för tracking.
+            Detaljsida för shipment i ShipOne admin. Här ser du varför ShipOne valde ett visst fraktupplägg, om fallback eller policy påverkade utfallet och hur tracking/sync ser ut just nu.
           </p>
+
+          ${
+            dummyDhl
+              ? `<div class="hero-note">DHL körs i testläge just nu. Routing och admin-flöde fungerar, men live-DHL API är ännu inte aktivt för detta shipment.</div>`
+              : ""
+          }
 
           <div class="hero-meta">
             <span class="badge ${statusClass}">${status}</span>
@@ -1326,6 +1529,7 @@ function renderAdminShipmentDetails({
         </div>
 
         <div class="grid">
+          ${renderDecisionPanel(enrichedShipment)}
           ${renderMerchantOverviewPanel(enrichedShipment, merchantOverview)}
           ${renderHealthPanel(enrichedShipment)}
           ${renderPolicyPanel(enrichedShipment)}

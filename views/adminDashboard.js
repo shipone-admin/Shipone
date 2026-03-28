@@ -86,13 +86,39 @@ function formatPolicyLabel(policy) {
 function formatShipOneChoice(choice) {
   const normalized = String(choice || "").toUpperCase();
 
-  if (normalized === "FAST") return "Fast";
-  if (normalized === "CHEAP") return "Cheap";
-  if (normalized === "GREEN") return "Smart";
+  if (normalized === "FAST") return "Snabb";
+  if (normalized === "CHEAP") return "Billig";
+  if (normalized === "GREEN") return "Miljövänlig";
   if (normalized === "SMART") return "Smart";
   if (normalized === "DHL_TEST") return "DHL Test";
 
   return choice || "-";
+}
+
+function describeShipOneChoice(choice) {
+  const normalized = String(choice || "").toUpperCase();
+
+  if (normalized === "FAST") {
+    return "ShipOne prioriterade snabbare leverans framför lägsta kostnad.";
+  }
+
+  if (normalized === "CHEAP") {
+    return "ShipOne prioriterade lägsta rimliga fraktkostnad för ordern.";
+  }
+
+  if (normalized === "GREEN") {
+    return "ShipOne prioriterade mer hållbart fraktval enligt vald logik.";
+  }
+
+  if (normalized === "SMART") {
+    return "ShipOne använde standardlogik för att balansera pris, hastighet och regler.";
+  }
+
+  if (normalized === "DHL_TEST") {
+    return "ShipOne kör DHL i testläge för att validera flödet innan live-tracking är aktiv.";
+  }
+
+  return "ShipOne gjorde ett automatiskt val baserat på tillgänglig orderdata.";
 }
 
 function getStatusClass(status) {
@@ -251,7 +277,7 @@ function buildPolicySummary(shipment) {
   if (fallbackUsed && selectedCarrier && actualCarrier && selectedCarrier !== actualCarrier) {
     return {
       label: "Fallback använd",
-      text: `Merchant tillät inte eller kunde inte använda vald carrier fullt ut. Faktisk carrier blev ${formatCarrierName(actualCarrier)}.`,
+      text: `ShipOne bytte från ${formatCarrierName(selectedCarrier)} till ${formatCarrierName(actualCarrier)} när ursprungsvalet inte gick att använda fullt ut.`,
       className: "policy-warning"
     };
   }
@@ -261,6 +287,20 @@ function buildPolicySummary(shipment) {
     text: "Inget tydligt merchant-policyblock syns för detta shipment.",
     className: "policy-ok"
   };
+}
+
+function buildChoiceReasonSummary(shipment) {
+  const choiceText = describeShipOneChoice(shipment?.shipone_choice);
+
+  if (isMerchantTrackingBlocked(shipment)) {
+    return `${choiceText} Tracking för aktuell carrier är dock blockerad av merchant-policy.`;
+  }
+
+  if (isFallbackShipment(shipment)) {
+    return `${choiceText} Det slutliga utfallet blev ett fallback-val för att ordern ändå skulle kunna hanteras.`;
+  }
+
+  return choiceText;
 }
 
 function buildFilterUrl(nextFilters = {}) {
@@ -374,12 +414,16 @@ function renderCarrierCell(shipment) {
 function renderStrategyCell(shipment) {
   const choice = formatShipOneChoice(shipment.shipone_choice);
   const fallbackUsed = Boolean(shipment.fallback_used);
+  const summary = buildChoiceReasonSummary(shipment);
 
   return `
     <div class="strategy-block">
-      <div class="primary">${escapeHtml(choice)}</div>
+      <div class="primary">ShipOne val: ${escapeHtml(choice)}</div>
+      <div class="secondary strategy-summary">
+        ${escapeHtml(summary)}
+      </div>
       <div class="secondary">
-        ${fallbackUsed ? "Fallback använd" : "Ingen fallback"}
+        ${fallbackUsed ? "Fallback användes i slututfallet" : "Automatiskt val utan fallback"}
       </div>
     </div>
   `;
@@ -742,7 +786,21 @@ function renderAdminDashboard({
           color: var(--muted);
           font-size: 17px;
           line-height: 1.7;
-          max-width: 980px;
+          max-width: 1040px;
+        }
+
+        .hero-note {
+          margin-top: 16px;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 14px;
+          background: #eef4ff;
+          border: 1px solid #dbeafe;
+          border-radius: 999px;
+          color: var(--brand-dark);
+          font-size: 13px;
+          font-weight: 700;
         }
 
         .stats {
@@ -1028,6 +1086,10 @@ function renderAdminDashboard({
           font-size: 12px;
           margin-top: 5px;
           line-height: 1.5;
+        }
+
+        .strategy-summary {
+          max-width: 260px;
         }
 
         .order-link {
@@ -1374,8 +1436,11 @@ function renderAdminDashboard({
         <div class="hero">
           <h1>Admin Dashboard</h1>
           <p class="subtitle">
-            Här ser du senaste ShipOne-försändelser, live carrier-status, senaste sync och tydliga driftindikatorer för problem, fallback, policyblock och nästa sync.
+            Här ser du ShipOne i praktiken: vilket fraktläge som valdes, vilken carrier som faktiskt användes, om fallback behövdes, om tracking blockerades av policy och hur senaste sync ser ut för varje order.
           </p>
+          <div class="hero-note">
+            Pilotläge: fokus på tydliga beslut per order, inte bara rå trackingdata.
+          </div>
 
           <div class="stats">
             ${renderStatCard({
@@ -1404,7 +1469,7 @@ function renderAdminDashboard({
                 policy: "ok"
               }),
               tone: "success",
-              subtitle: "Utan block/fallback",
+              subtitle: "Automatiskt flöde utan block/fallback",
               isActive: policy === "ok"
             })}
 
@@ -1416,7 +1481,7 @@ function renderAdminDashboard({
                 policy: "fallback"
               }),
               tone: "warning",
-              subtitle: "Fallback använd",
+              subtitle: "ShipOne behövde byta carrier",
               isActive: policy === "fallback"
             })}
 
@@ -1428,7 +1493,7 @@ function renderAdminDashboard({
                 policy: "blocked"
               }),
               tone: "danger",
-              subtitle: "Merchant-policy",
+              subtitle: "Merchant-policy stoppar live-tracking",
               isActive: policy === "blocked"
             })}
 
@@ -1455,7 +1520,7 @@ function renderAdminDashboard({
                 policy: policy || ""
               }),
               tone: "warning",
-              subtitle: "DHL dummy tracking",
+              subtitle: "DHL dummy tracking aktivt",
               isActive: health === "warning" && carrier === "dhl"
             })}
           </div>
@@ -1565,7 +1630,7 @@ function renderAdminDashboard({
                   <th>Order</th>
                   <th>Merchant</th>
                   <th>Health & policy</th>
-                  <th>Strategi</th>
+                  <th>ShipOne beslut</th>
                   <th>Carrier</th>
                   <th>Status</th>
                   <th>Tracking</th>

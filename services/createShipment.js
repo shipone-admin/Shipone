@@ -5,6 +5,7 @@
 
 const { createPostNordShipment } = require("../postnordShipment");
 const { createDHLShipment } = require("../carriers/dhl.service");
+const { createBudbeeShipment } = require("../carriers/budbee.service");
 
 const {
   canUseCarrierForShipment,
@@ -47,7 +48,19 @@ async function tryDHL(order) {
 async function tryBudbee(order) {
   console.log("📡 Trying Budbee...");
 
-  throw new Error("Budbee shipment service is not implemented yet");
+  const result = await createBudbeeShipment(order);
+
+  if (!result || result.success !== true) {
+    throw new Error(result?.error || "Budbee shipment failed");
+  }
+
+  console.log("✅ Budbee shipment created");
+
+  return {
+    carrier: "budbee",
+    success: true,
+    data: result.data || null
+  };
 }
 
 async function runCarrierAttempt(carrier, order) {
@@ -138,7 +151,9 @@ async function createShipment(order, selectedOption, merchantContext = {}) {
         merchant_id: merchantId
       };
     } catch (error) {
-      console.log(`❌ ${preferredCarrier.toUpperCase()} failed — activating fallback`);
+      console.log(
+        `❌ ${preferredCarrier.toUpperCase()} failed — activating fallback`
+      );
       console.log("Reason:", error.message);
     }
   }

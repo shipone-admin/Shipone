@@ -473,11 +473,12 @@ async function resolveMerchantContextFromRequest(req) {
     normalizeShopDomain(req.body?.shop_domain) ||
     normalizeShopDomain(req.query.shop_domain);
 
-  const explicitMerchantId =
-    normalizeMerchantId(req.headers["x-shipone-merchant-id"]) ||
-    normalizeMerchantId(req.body?.merchant_id) ||
-    normalizeMerchantId(req.query.merchant_id);
+  const explicitMerchantIdRaw =
+    req.headers["x-shipone-merchant-id"] ||
+    req.body?.merchant_id ||
+    req.query.merchant_id;
 
+  const explicitMerchantId = normalizeMerchantId(explicitMerchantIdRaw);
   const defaultMerchantId = normalizeMerchantId(
     process.env.SHIPONE_DEFAULT_MERCHANT_ID || "default"
   );

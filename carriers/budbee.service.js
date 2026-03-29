@@ -1,7 +1,9 @@
+const axios = require("axios");
+
 // =====================================================
 // BUDBEE SERVICE
 // SAFE SANDBOX FOUNDATION
-// STRICT READINESS VERSION
+// FIRST REAL SANDBOX REQUEST VERSION
 // =====================================================
 
 function getBudbeeConfig() {
@@ -35,7 +37,8 @@ function getBudbeeConfig() {
     defaultCountryCode:
       String(process.env.BUDBEE_DEFAULT_COUNTRY_CODE || "SE")
         .trim()
-        .toUpperCase() || "SE"
+        .toUpperCase() || "SE",
+    timeoutMs: Number(process.env.BUDBEE_TIMEOUT_MS || 15000)
   };
 }
 
@@ -51,7 +54,8 @@ function getBudbeePublicConfig() {
     hasProductionBaseUrl: Boolean(config.productionBaseUrl),
     hasApiKey: Boolean(config.apiKey),
     hasApiSecret: Boolean(config.apiSecret),
-    defaultCountryCode: config.defaultCountryCode
+    defaultCountryCode: config.defaultCountryCode,
+    timeoutMs: config.timeoutMs
   };
 }
 
@@ -216,6 +220,112 @@ function buildBudbeeReadinessError(readiness) {
   };
 }
 
+function buildBudbeeAuthHeader(config) {
+  const authString = `${config.apiKey}:${config.apiSecret}`;
+  return `Basic ${Buffer.from(authString).toString("base64")}`;
+}
+
+function buildBudbeePostalValidationRequest(draft, config) {
+  const countryCode = String(
+    draft?.recipient?.countryCode || config.defaultCountryCode || "SE"
+  )
+    .trim()
+    .toUpperCase();
+
+  const postalCode = normalizeBudbeePostalCode(draft?.recipient?.postalCode);
+
+  const path = `/postalcodes/validate/${encodeURIComponent(countryCode)}/${encodeURIComponent(postalCode)}`;
+  const url = `${String(config.baseUrl || "").replace(/\/+$/, "")}${path}`;
+
+  return {
+    method: "GET",
+    url,
+    headers: {
+      Authorization: buildBudbeeAuthHeader(config),
+      "Content-Type": "application/vnd.budbee.postalcodes-v2+json"
+    },
+    timeout: config.timeoutMs
+  };
+}
+
+async function validateBudbeePostalCode(draft, config = getBudbeeConfig()) {
+  const requestConfig = buildBudbeePostalValidationRequest(draft, config);
+
+  console.log("📮 Budbee postal validation request");
+  console.log("📮 Budbee mode:", config.mode);
+  console.log("📮 Budbee URL:", requestConfig.url);
+
+  try {
+    const response = await axios(requestConfig);
+
+    return {
+      success: true,
+      statusCode: response.status,
+      serviced: true,
+      senderAddresses: Array.isArray(response.data) ? response.data : [],
+      raw: response.data
+    };
+  } catch (error) {
+    const statusCode = error?.response?.status || 500;
+    const responseBody = error?.response?.data || null;
+
+    if (statusCode === 404) {
+      return {
+        success: false,
+        statusCode,
+        serviced: false,
+        errorCode: "postal_code_not_serviced",
+        error: "Budbee does not service this postal code",
+        raw: responseBody
+      };
+    }
+
+    if (statusCode === 401) {
+      return {
+        success: false,
+        statusCode,
+        serviced: false,
+        errorCode: "budbee_auth_failed",
+        error: "Budbee authentication failed",
+        raw: responseBody
+      };
+    }
+
+    if (statusCode === 403) {
+      return {
+        success: false,
+        statusCode,
+        serviced: false,
+        errorCode: "budbee_postal_validation_forbidden",
+        error: "Budbee rejected the postal validation request",
+        raw: responseBody
+      };
+    }
+
+    return {
+      success: false,
+      statusCode,
+      serviced: false,
+      errorCode: "budbee_postal_validation_failed",
+      error: error.message || "Budbee postal validation failed",
+      raw: responseBody
+    };
+  }
+}
+
+function pickDefaultCollectionId(postalValidationResult) {
+  const senderAddresses = Array.isArray(postalValidationResult?.senderAddresses)
+    ? postalValidationResult.senderAddresses
+    : [];
+
+  const defaultSender =
+    senderAddresses.find((item) => item?.defaultCollectionPoint === true) ||
+    senderAddresses[0] ||
+    null;
+
+  return defaultSender?.id || null;
+}
+
 async function createBudbeeShipment(order) {
   const readiness = getBudbeeShipmentReadiness(order);
   const config = readiness.config;
@@ -248,13 +358,42 @@ async function createBudbeeShipment(order) {
     };
   }
 
+  const postalValidation = await validateBudbeePostalCode(draft, config);
+
+  if (!postalValidation.success) {
+    console.log("❌ Budbee postal validation failed");
+    console.log("Reason:", postalValidation.error);
+
+    return {
+      success: false,
+      carrier: "budbee",
+      mode: config.mode,
+      draft,
+      postalValidation,
+      errorCode: postalValidation.errorCode || "budbee_postal_validation_failed",
+      error: postalValidation.error || "Budbee postal validation failed",
+      missingRequirements: [],
+      configReadiness: readiness.configReadiness,
+      draftValidation: readiness.draftValidation
+    };
+  }
+
+  const collectionId = pickDefaultCollectionId(postalValidation);
+
+  console.log("✅ Budbee postal validation passed");
+  console.log("📦 Budbee sender address count:", postalValidation.senderAddresses.length);
+  console.log("📦 Budbee default collectionId:", collectionId || "none");
+
   return {
     success: false,
     carrier: "budbee",
     mode: config.mode,
     draft,
-    errorCode: "budbee_request_not_implemented",
-    error: "Budbee shipment request is not implemented yet",
+    postalValidation,
+    suggestedCollectionId: collectionId,
+    errorCode: "budbee_order_request_not_implemented",
+    error:
+      "Budbee postal validation succeeded, but order creation is not implemented yet",
     missingRequirements: [],
     configReadiness: readiness.configReadiness,
     draftValidation: readiness.draftValidation
@@ -272,5 +411,9 @@ module.exports = {
   getBudbeeShipmentReadiness,
   mapBudbeeReadinessErrorCode,
   buildBudbeeReadinessError,
+  buildBudbeeAuthHeader,
+  buildBudbeePostalValidationRequest,
+  validateBudbeePostalCode,
+  pickDefaultCollectionId,
   createBudbeeShipment
 };

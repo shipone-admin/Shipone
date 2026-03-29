@@ -1,8 +1,8 @@
 // =====================================================
-// DHL MOCK (ESM)
+// DHL MOCK
 // =====================================================
 
-export default {
+module.exports = {
   async getRates(order) {
     console.log("📦 DHL MOCK called");
 

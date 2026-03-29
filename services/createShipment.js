@@ -1,11 +1,12 @@
 // ================================
 // SHIPONE UNIVERSAL SHIPMENT HANDLER
 // CARRIER-CONFIG + MERCHANT SETTINGS VERSION
+// SAFE BUDBEE FALLBACK VERSION
 // ================================
 
 const { createPostNordShipment } = require("../postnordShipment");
 const { createDHLShipment } = require("../carriers/dhl.service");
-const { createBudbeeShipment } = require("../carriers/budbee.service");
+const { createShipment: createBudbeeMockShipment } = require("../carriers/budbee.mock");
 
 const {
   canUseCarrierForShipment,
@@ -48,10 +49,10 @@ async function tryDHL(order) {
 async function tryBudbee(order) {
   console.log("📡 Trying Budbee...");
 
-  const result = await createBudbeeShipment(order);
+  const result = await createBudbeeMockShipment(order);
 
-  if (!result || result.success !== true) {
-    throw new Error(result?.error || "Budbee shipment failed");
+  if (!result || result.success !== true || !result.data) {
+    throw new Error("Budbee mock shipment failed");
   }
 
   console.log("✅ Budbee shipment created");
@@ -59,7 +60,7 @@ async function tryBudbee(order) {
   return {
     carrier: "budbee",
     success: true,
-    data: result.data || null
+    data: result.data
   };
 }
 
@@ -151,9 +152,7 @@ async function createShipment(order, selectedOption, merchantContext = {}) {
         merchant_id: merchantId
       };
     } catch (error) {
-      console.log(
-        `❌ ${preferredCarrier.toUpperCase()} failed — activating fallback`
-      );
+      console.log(`❌ ${preferredCarrier.toUpperCase()} failed — activating fallback`);
       console.log("Reason:", error.message);
     }
   }

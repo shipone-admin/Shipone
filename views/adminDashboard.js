@@ -1,4 +1,9 @@
 const { enrichShipmentsWithHealth } = require("../services/shipmentHealth");
+const {
+  canUseCarrierForShipment,
+  getCarrierMode,
+  getCarrierStatus
+} = require("../services/carrierConfig");
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -140,6 +145,78 @@ function getSyncClass(status) {
   if (normalized === "disabled") return "sync-blocked";
 
   return "sync-neutral";
+}
+
+function getCarrierModeLabel(carrier) {
+  const mode = String(getCarrierMode(carrier) || "").toLowerCase();
+
+  if (mode === "production") return "Live";
+  if (mode === "mock") return "Mock";
+
+  return "Okänt läge";
+}
+
+function getCarrierModeClass(carrier) {
+  const mode = String(getCarrierMode(carrier) || "").toLowerCase();
+
+  if (mode === "production") return "meta-live";
+  if (mode === "mock") return "meta-mock";
+
+  return "meta-neutral";
+}
+
+function getCarrierStatusLabel(carrier) {
+  const status = String(getCarrierStatus(carrier) || "").toLowerCase();
+
+  if (status === "live") return "Live";
+  if (status === "in_progress") return "Pågår";
+  if (status === "planned") return "Planerad";
+
+  return "Okänd status";
+}
+
+function getCarrierStatusClass(carrier) {
+  const status = String(getCarrierStatus(carrier) || "").toLowerCase();
+
+  if (status === "live") return "meta-live";
+  if (status === "in_progress") return "meta-warning";
+  if (status === "planned") return "meta-neutral";
+
+  return "meta-neutral";
+}
+
+function getCarrierBookableLabel(carrier) {
+  return canUseCarrierForShipment(carrier)
+    ? "Bokningsbar"
+    : "Ej bokningsbar";
+}
+
+function getCarrierBookableClass(carrier) {
+  return canUseCarrierForShipment(carrier)
+    ? "meta-bookable"
+    : "meta-unbookable";
+}
+
+function renderCarrierMetaChips(carrier) {
+  const carrierKey = String(carrier || "").toLowerCase();
+
+  if (!carrierKey) {
+    return "";
+  }
+
+  return `
+    <div class="carrier-meta-row">
+      <span class="carrier-meta-pill ${escapeHtml(getCarrierModeClass(carrierKey))}">
+        ${escapeHtml(getCarrierModeLabel(carrierKey))}
+      </span>
+      <span class="carrier-meta-pill ${escapeHtml(getCarrierStatusClass(carrierKey))}">
+        ${escapeHtml(getCarrierStatusLabel(carrierKey))}
+      </span>
+      <span class="carrier-meta-pill ${escapeHtml(getCarrierBookableClass(carrierKey))}">
+        ${escapeHtml(getCarrierBookableLabel(carrierKey))}
+      </span>
+    </div>
+  `;
 }
 
 function isProblemShipment(shipment) {
@@ -376,10 +453,12 @@ function renderCarrierCell(shipment) {
         <div class="primary">
           <span class="carrier-pill carrier-pill-selected">Vald: ${escapeHtml(selectedCarrier)}</span>
         </div>
+        ${renderCarrierMetaChips(shipment.selected_carrier)}
         <div class="secondary">Tjänst: ${escapeHtml(selectedService)}</div>
         <div class="secondary">
           <span class="carrier-pill carrier-pill-actual">Faktisk: ${escapeHtml(actualCarrier)}</span>
         </div>
+        ${renderCarrierMetaChips(shipment.actual_carrier)}
         <div class="secondary carrier-fallback-text">
           Fallback från ${escapeHtml(fallbackFrom || selectedCarrier)} till ${escapeHtml(actualCarrier)}
         </div>
@@ -393,10 +472,12 @@ function renderCarrierCell(shipment) {
         <div class="primary">
           <span class="carrier-pill carrier-pill-selected">Vald: ${escapeHtml(selectedCarrier)}</span>
         </div>
+        ${renderCarrierMetaChips(shipment.selected_carrier)}
         <div class="secondary">Tjänst: ${escapeHtml(selectedService)}</div>
         <div class="secondary">
           <span class="carrier-pill carrier-pill-actual">Faktisk: ${escapeHtml(actualCarrier)}</span>
         </div>
+        ${renderCarrierMetaChips(shipment.actual_carrier)}
       </div>
     `;
   }
@@ -406,6 +487,7 @@ function renderCarrierCell(shipment) {
       <div class="primary">
         <span class="carrier-pill">${escapeHtml(actualCarrier)}</span>
       </div>
+      ${renderCarrierMetaChips(shipment.actual_carrier)}
       <div class="secondary">Tjänst: ${escapeHtml(selectedService)}</div>
     </div>
   `;
@@ -1221,6 +1303,59 @@ function renderAdminDashboard({
           background: #ecfdf5;
           border-color: #ccefdc;
           color: #047857;
+        }
+
+        .carrier-meta-row {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+          margin-top: 8px;
+        }
+
+        .carrier-meta-pill {
+          display: inline-flex;
+          align-items: center;
+          border-radius: 999px;
+          padding: 6px 10px;
+          font-size: 11px;
+          font-weight: 800;
+          border: 1px solid transparent;
+        }
+
+        .meta-live {
+          background: #ecfdf5;
+          border-color: #bbf7d0;
+          color: #047857;
+        }
+
+        .meta-mock {
+          background: #eff6ff;
+          border-color: #bfdbfe;
+          color: #1d4ed8;
+        }
+
+        .meta-warning {
+          background: #fff7ed;
+          border-color: #fed7aa;
+          color: #b45309;
+        }
+
+        .meta-bookable {
+          background: #ecfdf5;
+          border-color: #bbf7d0;
+          color: #047857;
+        }
+
+        .meta-unbookable {
+          background: #fef2f2;
+          border-color: #fecaca;
+          color: #b91c1c;
+        }
+
+        .meta-neutral {
+          background: #f8fafc;
+          border-color: #e2e8f0;
+          color: #475569;
         }
 
         .carrier-fallback-text {

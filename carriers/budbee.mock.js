@@ -1,8 +1,8 @@
 // =====================================================
-// BUDBEE MOCK (ESM)
+// BUDBEE MOCK
 // =====================================================
 
-export default {
+module.exports = {
   async getRates(order) {
     console.log("📦 Budbee MOCK called");
 

@@ -67,6 +67,7 @@ const {
 } = require("./views/trackingPage");
 
 const { renderHomePage } = require("./views/homePage");
+const { renderLandingPage } = require("./views/landingPage");
 const { renderAdminDashboard } = require("./views/adminDashboard");
 const { renderAdminShipmentDetails } = require("./views/adminShipmentDetails");
 const { renderAdminMerchantsPage } = require("./views/adminMerchants");
@@ -622,6 +623,10 @@ function renderDHLTestPage({
 }
 
 app.get("/", (req, res) => {
+  return res.status(200).send(renderLandingPage());
+});
+
+app.get("/home", (req, res) => {
   return res.status(200).send(renderHomePage());
 });
 

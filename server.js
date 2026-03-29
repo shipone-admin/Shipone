@@ -1733,5 +1733,44 @@ async function startServer() {
     process.exit(1);
   }
 }
+app.get("/admin/debug/network", requireCronSecret, async (req, res) => {
+  try {
+    const axios = require("axios");
 
+    let dnsOk = false;
+    let httpResult = null;
+    let error = null;
+
+    try {
+      // testa HTTP direkt
+      const response = await axios.get("https://api.staging.budbee.com", {
+        timeout: 5000
+      });
+
+      dnsOk = true;
+      httpResult = {
+        status: response.status,
+        headers: response.headers
+      };
+    } catch (err) {
+      error = {
+        message: err.message,
+        code: err.code || null
+      };
+    }
+
+    return res.json({
+      success: true,
+      test: "budbee_dns_http",
+      dnsOk,
+      httpResult,
+      error
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
 startServer();

@@ -1,7 +1,7 @@
 // ================================
 // SHIPONE RATE COLLECTOR
 // CARRIER-CONFIG VERSION
-// MATCHED TO CURRENT MOCK EXPORTS
+// COMMONJS SAFE VERSION
 // ================================
 
 const {
@@ -10,16 +10,8 @@ const {
 } = require("../services/carrierConfig");
 
 const { getRates: getPostNordRates } = require("../carriers/postnord.mock");
-
-async function loadDHLRates(order) {
-  const dhlModule = await import("../carriers/dhl.mock.js");
-  return await dhlModule.default.getRates(order);
-}
-
-async function loadBudbeeRates(order) {
-  const budbeeModule = await import("../carriers/budbee.mock.js");
-  return await budbeeModule.default.getRates(order);
-}
+const { getRates: getDHLRates } = require("../carriers/dhl.mock");
+const { getRates: getBudbeeRates } = require("../carriers/budbee.mock");
 
 function pushRates(allRates, incomingRates) {
   if (Array.isArray(incomingRates)) {
@@ -43,7 +35,7 @@ async function collectRates(order) {
 
   if (canUseCarrierForRates("postnord")) {
     try {
-      const postnordRates = getPostNordRates(order);
+      const postnordRates = await getPostNordRates(order);
       pushRates(allRates, postnordRates);
     } catch (error) {
       console.log("❌ PostNord rates failed");
@@ -55,7 +47,7 @@ async function collectRates(order) {
 
   if (canUseCarrierForRates("dhl")) {
     try {
-      const dhlRates = await loadDHLRates(order);
+      const dhlRates = await getDHLRates(order);
       pushRates(allRates, dhlRates);
     } catch (error) {
       console.log("❌ DHL rates failed");
@@ -67,7 +59,7 @@ async function collectRates(order) {
 
   if (canUseCarrierForRates("budbee")) {
     try {
-      const budbeeRates = await loadBudbeeRates(order);
+      const budbeeRates = await getBudbeeRates(order);
       pushRates(allRates, budbeeRates);
     } catch (error) {
       console.log("❌ Budbee rates failed");

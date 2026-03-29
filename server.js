@@ -69,7 +69,9 @@ const {
 
 const {
   getBudbeePublicConfig,
-  getBudbeeShipmentReadiness
+  getBudbeeShipmentReadiness,
+  validateBudbeePostalCode,
+  pickDefaultCollectionId
 } = require("./carriers/budbee.service");
 
 const {
@@ -291,6 +293,82 @@ function buildPreviewOrder() {
   };
 }
 
+function buildBudbeeDebugOrder(queryParams = {}) {
+  const previewOrder = buildPreviewOrder();
+
+  const firstName = String(
+    queryParams.first_name ||
+      previewOrder.shipping_address.first_name ||
+      previewOrder.customer.first_name ||
+      ""
+  ).trim();
+
+  const lastName = String(
+    queryParams.last_name ||
+      previewOrder.shipping_address.last_name ||
+      previewOrder.customer.last_name ||
+      ""
+  ).trim();
+
+  const city = String(
+    queryParams.city ||
+      previewOrder.shipping_address.city ||
+      ""
+  ).trim();
+
+  const zip = String(
+    queryParams.zip ||
+      previewOrder.shipping_address.zip ||
+      ""
+  ).trim();
+
+  const countryCode = String(
+    queryParams.country_code ||
+      previewOrder.shipping_address.country_code ||
+      "SE"
+  )
+    .trim()
+    .toUpperCase();
+
+  const email = String(queryParams.email || "").trim() || null;
+  const phone = String(queryParams.phone || "").trim() || null;
+  const address1 = String(queryParams.address1 || "").trim() || null;
+  const address2 = String(queryParams.address2 || "").trim() || null;
+  const shopDomain = String(queryParams.shop_domain || "").trim() || null;
+
+  return {
+    ...previewOrder,
+    id: String(queryParams.order_id || previewOrder.id).trim() || previewOrder.id,
+    name: String(queryParams.order_name || previewOrder.name).trim() || previewOrder.name,
+    email,
+    phone,
+    shop_domain: shopDomain,
+    shipping_address: {
+      ...previewOrder.shipping_address,
+      first_name: firstName || null,
+      last_name: lastName || null,
+      address1,
+      address2,
+      city: city || null,
+      zip: zip || null,
+      country: String(
+        queryParams.country ||
+          previewOrder.shipping_address.country ||
+          "Sweden"
+      ).trim(),
+      country_code: countryCode,
+      phone
+    },
+    customer: {
+      ...previewOrder.customer,
+      first_name: firstName || previewOrder.customer.first_name,
+      last_name: lastName || previewOrder.customer.last_name,
+      email,
+      phone
+    }
+  };
+}
+
 function buildStrategyMeta(strategyKey) {
   if (strategyKey === "FAST") {
     return {
@@ -470,82 +548,6 @@ async function buildShipOneRatePreview(merchantContext = {}) {
   };
 }
 
-function buildBudbeeDebugOrder(queryParams = {}) {
-  const previewOrder = buildPreviewOrder();
-
-  const firstName = String(
-    queryParams.first_name ||
-    previewOrder.shipping_address.first_name ||
-    previewOrder.customer.first_name ||
-    ""
-  ).trim();
-
-  const lastName = String(
-    queryParams.last_name ||
-    previewOrder.shipping_address.last_name ||
-    previewOrder.customer.last_name ||
-    ""
-  ).trim();
-
-  const city = String(
-    queryParams.city ||
-    previewOrder.shipping_address.city ||
-    ""
-  ).trim();
-
-  const zip = String(
-    queryParams.zip ||
-    previewOrder.shipping_address.zip ||
-    ""
-  ).trim();
-
-  const countryCode = String(
-    queryParams.country_code ||
-    previewOrder.shipping_address.country_code ||
-    "SE"
-  )
-    .trim()
-    .toUpperCase();
-
-  const email = String(queryParams.email || "").trim() || null;
-  const phone = String(queryParams.phone || "").trim() || null;
-  const address1 = String(queryParams.address1 || "").trim() || null;
-  const address2 = String(queryParams.address2 || "").trim() || null;
-  const shopDomain = String(queryParams.shop_domain || "").trim() || null;
-
-  return {
-    ...previewOrder,
-    id: String(queryParams.order_id || previewOrder.id).trim() || previewOrder.id,
-    name: String(queryParams.order_name || previewOrder.name).trim() || previewOrder.name,
-    email,
-    phone,
-    shop_domain: shopDomain,
-    shipping_address: {
-      ...previewOrder.shipping_address,
-      first_name: firstName || null,
-      last_name: lastName || null,
-      address1,
-      address2,
-      city: city || null,
-      zip: zip || null,
-      country: String(
-        queryParams.country ||
-        previewOrder.shipping_address.country ||
-        "Sweden"
-      ).trim(),
-      country_code: countryCode,
-      phone
-    },
-    customer: {
-      ...previewOrder.customer,
-      first_name: firstName || previewOrder.customer.first_name,
-      last_name: lastName || previewOrder.customer.last_name,
-      email,
-      phone
-    }
-  };
-}
-
 function renderTrackingDisabledPage() {
   return `
     <!DOCTYPE html>
@@ -576,7 +578,7 @@ async function isTrackingAllowedForShipment(shipment) {
 
   const merchantId = normalizeMerchantId(shipment?.merchant_id || "default");
 
-  return isTrackingCarrierEnabledForShipment(merchantId, actualCarrier);
+  return isTrackingCarrierEnabledForMerchant(merchantId, actualCarrier);
 }
 
 async function getLiveCarrierTrackingForShipment(shipment) {
@@ -1011,6 +1013,66 @@ app.get("/admin/debug/budbee", requireCronSecret, async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Budbee debug route failed"
+    });
+  }
+});
+
+app.get("/admin/debug/budbee/live", requireCronSecret, async (req, res) => {
+  try {
+    const order = buildBudbeeDebugOrder(req.query);
+    const readiness = getBudbeeShipmentReadiness(order);
+    const publicConfig = getBudbeePublicConfig();
+
+    if (!readiness.ready) {
+      return res.status(200).json({
+        success: false,
+        carrier: "budbee",
+        debug: {
+          ready: false,
+          config: publicConfig,
+          configReadiness: readiness.configReadiness,
+          draftValidation: readiness.draftValidation,
+          missingRequirements: readiness.missingRequirements,
+          errorCode: readiness.missingRequirements[0] || "budbee_not_ready",
+          order,
+          draft: readiness.draft
+        }
+      });
+    }
+
+    const postalValidation = await validateBudbeePostalCode(
+      readiness.draft,
+      readiness.config
+    );
+
+    const suggestedCollectionId = postalValidation.success
+      ? pickDefaultCollectionId(postalValidation)
+      : null;
+
+    return res.status(200).json({
+      success: postalValidation.success,
+      carrier: "budbee",
+      debug: {
+        ready: true,
+        config: publicConfig,
+        configReadiness: readiness.configReadiness,
+        draftValidation: readiness.draftValidation,
+        missingRequirements: readiness.missingRequirements,
+        errorCode: postalValidation.success
+          ? null
+          : postalValidation.errorCode || "budbee_postal_validation_failed",
+        order,
+        draft: readiness.draft,
+        postalValidation,
+        suggestedCollectionId
+      }
+    });
+  } catch (error) {
+    console.error("Budbee live debug route failed:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "Budbee live debug route failed"
     });
   }
 });

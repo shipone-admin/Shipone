@@ -68,6 +68,12 @@ const {
 } = require("./services/carrierConfig");
 
 const {
+  getBudbeePublicConfig,
+  buildBudbeeShipmentDraft,
+  validateBudbeeDraft
+} = require("./carriers/budbee.service");
+
+const {
   renderTrackingPage,
   renderTrackingNotFoundPage,
   renderTrackingErrorPage
@@ -461,6 +467,47 @@ async function buildShipOneRatePreview(merchantContext = {}) {
       FASTEST: fastestPreview,
       CHEAPEST: cheapestPreview,
       GREEN: greenPreview
+    }
+  };
+}
+
+function buildBudbeeDebugOrder(queryParams = {}) {
+  const previewOrder = buildPreviewOrder();
+
+  const firstName = String(queryParams.first_name || previewOrder.customer.first_name || "").trim();
+  const lastName = String(queryParams.last_name || previewOrder.customer.last_name || "").trim();
+  const city = String(queryParams.city || previewOrder.shipping_address.city || "").trim();
+  const zip = String(queryParams.zip || previewOrder.shipping_address.zip || "").trim();
+  const countryCode = String(
+    queryParams.country_code || previewOrder.shipping_address.country_code || "SE"
+  )
+    .trim()
+    .toUpperCase();
+
+  return {
+    ...previewOrder,
+    id: String(queryParams.order_id || previewOrder.id).trim() || previewOrder.id,
+    name: String(queryParams.order_name || previewOrder.name).trim() || previewOrder.name,
+    email: String(queryParams.email || "").trim() || null,
+    shop_domain: String(queryParams.shop_domain || "").trim() || null,
+    shipping_address: {
+      ...previewOrder.shipping_address,
+      first_name: firstName || null,
+      last_name: lastName || null,
+      address1: String(queryParams.address1 || "").trim() || null,
+      address2: String(queryParams.address2 || "").trim() || null,
+      city: city || null,
+      zip: zip || null,
+      country: String(queryParams.country || previewOrder.shipping_address.country || "Sweden").trim(),
+      country_code: countryCode,
+      phone: String(queryParams.phone || "").trim() || null
+    },
+    customer: {
+      ...previewOrder.customer,
+      first_name: firstName || previewOrder.customer.first_name,
+      last_name: lastName || previewOrder.customer.last_name,
+      email: String(queryParams.email || "").trim() || null,
+      phone: String(queryParams.phone || "").trim() || null
     }
   };
 }
@@ -899,6 +946,33 @@ app.post("/admin/merchant-carriers/upsert", requireCronSecret, async (req, res) 
     return res.redirect(
       `/admin/merchant-carriers?token=${encodeURIComponent(req.body.token || "")}&message=${encodeURIComponent(error.message)}&type=error`
     );
+  }
+});
+
+app.get("/admin/debug/budbee", requireCronSecret, async (req, res) => {
+  try {
+    const order = buildBudbeeDebugOrder(req.query);
+    const publicConfig = getBudbeePublicConfig();
+    const draft = buildBudbeeShipmentDraft(order);
+    const validation = validateBudbeeDraft(draft);
+
+    return res.status(200).json({
+      success: true,
+      carrier: "budbee",
+      debug: {
+        config: publicConfig,
+        validation,
+        order,
+        draft
+      }
+    });
+  } catch (error) {
+    console.error("Budbee debug route failed:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "Budbee debug route failed"
+    });
   }
 });
 

@@ -1,6 +1,7 @@
 // =====================================================
 // BUDBEE SERVICE
 // SAFE SANDBOX FOUNDATION
+// STRICT READINESS VERSION
 // =====================================================
 
 function getBudbeeConfig() {
@@ -32,7 +33,9 @@ function getBudbeeConfig() {
     apiKey: String(process.env.BUDBEE_API_KEY || "").trim() || null,
     apiSecret: String(process.env.BUDBEE_API_SECRET || "").trim() || null,
     defaultCountryCode:
-      String(process.env.BUDBEE_DEFAULT_COUNTRY_CODE || "SE").trim().toUpperCase() || "SE"
+      String(process.env.BUDBEE_DEFAULT_COUNTRY_CODE || "SE")
+        .trim()
+        .toUpperCase() || "SE"
   };
 }
 
@@ -130,23 +133,118 @@ function validateBudbeeDraft(draft) {
   };
 }
 
-async function createBudbeeShipment(order) {
+function getBudbeeConfigReadiness(config = getBudbeeConfig()) {
+  const missingConfig = [];
+
+  if (!config.baseUrl) missingConfig.push("baseUrl");
+  if (!config.apiKey) missingConfig.push("apiKey");
+  if (!config.apiSecret) missingConfig.push("apiSecret");
+
+  return {
+    ready: missingConfig.length === 0,
+    missingConfig
+  };
+}
+
+function getBudbeeShipmentReadiness(order) {
   const config = getBudbeeConfig();
   const draft = buildBudbeeShipmentDraft(order);
-  const validation = validateBudbeeDraft(draft);
+  const draftValidation = validateBudbeeDraft(draft);
+  const configReadiness = getBudbeeConfigReadiness(config);
+
+  const missingRequirements = [
+    ...configReadiness.missingConfig.map((field) => `config.${field}`),
+    ...draftValidation.missingFields
+  ];
+
+  return {
+    ready: configReadiness.ready && draftValidation.valid,
+    config,
+    draft,
+    configReadiness,
+    draftValidation,
+    missingRequirements
+  };
+}
+
+function mapBudbeeReadinessErrorCode(readiness) {
+  const missingRequirements = Array.isArray(readiness?.missingRequirements)
+    ? readiness.missingRequirements
+    : [];
+
+  if (missingRequirements.includes("config.baseUrl")) {
+    return "missing_base_url";
+  }
+
+  if (missingRequirements.includes("config.apiKey")) {
+    return "missing_api_key";
+  }
+
+  if (missingRequirements.includes("config.apiSecret")) {
+    return "missing_api_secret";
+  }
+
+  if (missingRequirements.some((field) => field.startsWith("recipient."))) {
+    return "missing_recipient_fields";
+  }
+
+  return "budbee_not_ready";
+}
+
+function buildBudbeeReadinessError(readiness) {
+  const code = mapBudbeeReadinessErrorCode(readiness);
+  const missingRequirements = Array.isArray(readiness?.missingRequirements)
+    ? readiness.missingRequirements
+    : [];
+
+  const labels = {
+    missing_base_url: "Budbee base URL saknas",
+    missing_api_key: "Budbee API key saknas",
+    missing_api_secret: "Budbee API secret saknas",
+    missing_recipient_fields: "Budbee shipment saknar mottagarfält",
+    budbee_not_ready: "Budbee är inte redo"
+  };
+
+  const messageBase = labels[code] || "Budbee är inte redo";
+
+  return {
+    code,
+    message:
+      missingRequirements.length > 0
+        ? `${messageBase}: ${missingRequirements.join(", ")}`
+        : messageBase
+  };
+}
+
+async function createBudbeeShipment(order) {
+  const readiness = getBudbeeShipmentReadiness(order);
+  const config = readiness.config;
+  const draft = readiness.draft;
 
   console.log("📦 Budbee shipment requested");
   console.log("📦 Budbee mode:", config.mode);
   console.log("📦 Budbee base URL configured:", Boolean(config.baseUrl));
-  console.log("📦 Budbee API credentials configured:", Boolean(config.apiKey && config.apiSecret));
+  console.log(
+    "📦 Budbee API credentials configured:",
+    Boolean(config.apiKey && config.apiSecret)
+  );
 
-  if (!validation.valid) {
+  if (!readiness.ready) {
+    const readinessError = buildBudbeeReadinessError(readiness);
+
+    console.log("❌ Budbee readiness failed");
+    console.log("Reason:", readinessError.message);
+
     return {
       success: false,
       carrier: "budbee",
       mode: config.mode,
       draft,
-      error: `Budbee shipment draft is missing required fields: ${validation.missingFields.join(", ")}`
+      errorCode: readinessError.code,
+      error: readinessError.message,
+      missingRequirements: readiness.missingRequirements,
+      configReadiness: readiness.configReadiness,
+      draftValidation: readiness.draftValidation
     };
   }
 
@@ -155,7 +253,11 @@ async function createBudbeeShipment(order) {
     carrier: "budbee",
     mode: config.mode,
     draft,
-    error: "Budbee shipment service is not implemented yet"
+    errorCode: "budbee_request_not_implemented",
+    error: "Budbee shipment request is not implemented yet",
+    missingRequirements: [],
+    configReadiness: readiness.configReadiness,
+    draftValidation: readiness.draftValidation
   };
 }
 
@@ -166,5 +268,9 @@ module.exports = {
   buildBudbeeRecipient,
   buildBudbeeShipmentDraft,
   validateBudbeeDraft,
+  getBudbeeConfigReadiness,
+  getBudbeeShipmentReadiness,
+  mapBudbeeReadinessErrorCode,
+  buildBudbeeReadinessError,
   createBudbeeShipment
 };

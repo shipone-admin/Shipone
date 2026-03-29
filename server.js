@@ -57,8 +57,15 @@ const {
   getMerchantCarrierMatrix,
   upsertMerchantCarrierSetting,
   getEnabledRateCarriersForMerchant,
-  isTrackingCarrierEnabledForMerchant
+  isTrackingCarrierEnabledForMerchant,
+  isShipmentCarrierEnabledForMerchant
 } = require("./services/merchantCarrierSettings");
+
+const {
+  canUseCarrierForShipment,
+  getCarrierMode,
+  getCarrierStatus
+} = require("./services/carrierConfig");
 
 const {
   renderTrackingPage,
@@ -306,7 +313,52 @@ function buildStrategyMeta(strategyKey) {
   };
 }
 
-function buildPreviewOption(strategyKey, selectedOption, allRates) {
+async function buildPreviewRateCard(option, merchantId) {
+  const carrierKey = String(option?.carrier || "").trim().toLowerCase();
+
+  const shipmentGloballyAvailable = canUseCarrierForShipment(carrierKey);
+  const shipmentMerchantEnabled = carrierKey
+    ? await isShipmentCarrierEnabledForMerchant(merchantId, carrierKey)
+    : false;
+
+  const shipmentAvailable =
+    shipmentGloballyAvailable && shipmentMerchantEnabled;
+
+  let shipmentBlockedReason = null;
+
+  if (!shipmentAvailable) {
+    if (!shipmentGloballyAvailable) {
+      shipmentBlockedReason = "shipment_disabled_globally";
+    } else if (!shipmentMerchantEnabled) {
+      shipmentBlockedReason = "shipment_disabled_for_merchant";
+    } else {
+      shipmentBlockedReason = "shipment_unavailable";
+    }
+  }
+
+  return {
+    carrier: option.carrier || null,
+    carrierLabel: formatCarrierLabel(option.carrier),
+    carrierMode: getCarrierMode(carrierKey),
+    carrierStatus: getCarrierStatus(carrierKey),
+    service: option.name || "-",
+    price: Number(option.price ?? 0),
+    priceLabel: formatPriceLabel(option.price),
+    etaDays: option.eta_days ?? null,
+    etaLabel: formatEtaLabel(option.eta_days),
+    co2: option.co2 ?? null,
+    shipmentAvailable,
+    shipmentBlockedReason,
+    raw: option
+  };
+}
+
+async function buildPreviewOption(
+  strategyKey,
+  selectedOption,
+  allRates,
+  merchantId
+) {
   const meta = buildStrategyMeta(strategyKey);
 
   if (!selectedOption) {
@@ -315,26 +367,25 @@ function buildPreviewOption(strategyKey, selectedOption, allRates) {
       available: false,
       carrier: "-",
       carrierLabel: "Ingen aktiv carrier",
+      carrierMode: "unknown",
+      carrierStatus: "unknown",
       service: "-",
       etaDays: null,
       etaLabel: "Ingen leveranstid tillgänglig",
       price: null,
       priceLabel: "-",
+      shipmentAvailable: false,
+      shipmentBlockedReason: "no_rate_available",
       raw: null
     };
   }
 
+  const rateCard = await buildPreviewRateCard(selectedOption, merchantId);
+
   return {
     ...meta,
     available: true,
-    carrier: selectedOption.carrier || null,
-    carrierLabel: formatCarrierLabel(selectedOption.carrier),
-    service: selectedOption.name || "-",
-    etaDays: selectedOption.eta_days ?? null,
-    etaLabel: formatEtaLabel(selectedOption.eta_days),
-    price: Number(selectedOption.price ?? 0),
-    priceLabel: formatPriceLabel(selectedOption.price),
-    raw: selectedOption,
+    ...rateCard,
     comparedRateCount: Array.isArray(allRates) ? allRates.length : 0
   };
 }
@@ -362,6 +413,7 @@ async function filterRatesForMerchant(rates, merchantContext = {}) {
 }
 
 async function buildShipOneRatePreview(merchantContext = {}) {
+  const merchantId = normalizeMerchantId(merchantContext.merchant_id);
   const previewOrder = buildPreviewOrder();
   const shippingOptions = await collectRates(previewOrder);
   const filteredOptions = await filterRatesForMerchant(
@@ -373,27 +425,42 @@ async function buildShipOneRatePreview(merchantContext = {}) {
   const cheapOption = chooseBestOption(filteredOptions, "CHEAP");
   const greenOption = chooseBestOption(filteredOptions, "GREEN");
 
+  const activeRates = await Promise.all(
+    filteredOptions.map((option) => buildPreviewRateCard(option, merchantId))
+  );
+
+  const fastestPreview = await buildPreviewOption(
+    "FAST",
+    fastOption,
+    filteredOptions,
+    merchantId
+  );
+
+  const cheapestPreview = await buildPreviewOption(
+    "CHEAP",
+    cheapOption,
+    filteredOptions,
+    merchantId
+  );
+
+  const greenPreview = await buildPreviewOption(
+    "GREEN",
+    greenOption,
+    filteredOptions,
+    merchantId
+  );
+
   return {
     success: true,
     generatedAt: new Date().toISOString(),
     currency: "SEK",
-    merchant_id: normalizeMerchantId(merchantContext.merchant_id),
+    merchant_id: merchantId,
     activeRateCount: filteredOptions.length,
-    activeRates: filteredOptions.map((option) => ({
-      carrier: option.carrier || null,
-      carrierLabel: formatCarrierLabel(option.carrier),
-      service: option.name || "-",
-      price: Number(option.price ?? 0),
-      priceLabel: formatPriceLabel(option.price),
-      etaDays: option.eta_days ?? null,
-      etaLabel: formatEtaLabel(option.eta_days),
-      co2: option.co2 ?? null,
-      raw: option
-    })),
+    activeRates,
     strategies: {
-      FASTEST: buildPreviewOption("FAST", fastOption, filteredOptions),
-      CHEAPEST: buildPreviewOption("CHEAP", cheapOption, filteredOptions),
-      GREEN: buildPreviewOption("GREEN", greenOption, filteredOptions)
+      FASTEST: fastestPreview,
+      CHEAPEST: cheapestPreview,
+      GREEN: greenPreview
     }
   };
 }

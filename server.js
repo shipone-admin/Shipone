@@ -1906,7 +1906,31 @@ app.post("/webhooks/orders-create", async (req, res) => {
 async function startServer() {
   try {
     await initDatabase();
+app.get("/test-dhl-freight", async (req, res) => {
+  try {
+    const { createDHLShipment } = require("./carriers/dhl.service");
 
+    const fakeOrder = {
+      id: Date.now().toString(),
+      name: "#DHL-FREIGHT-TEST",
+      email: "test@shipone.se",
+      shipping_address: {
+        city: "Stockholm",
+        zip: "11122",
+        country: "SE"
+      }
+    };
+
+    const result = await createDHLShipment(fakeOrder);
+
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
     app.listen(PORT, () => {
       console.log(`ShipOne running on port ${PORT}`);
       console.log(

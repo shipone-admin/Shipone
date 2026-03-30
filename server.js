@@ -340,9 +340,21 @@ function buildBudbeeDebugOrder(queryParams = {}) {
   };
 }
 
+function buildSafeNumericOrderId(rawValue) {
+  const digitsOnly = String(rawValue || "").replace(/\D/g, "");
+
+  if (digitsOnly) {
+    return digitsOnly;
+  }
+
+  return String(Date.now());
+}
+
 function buildAdminBudbeeTestOrder(queryParams = {}) {
   const timestamp = Date.now();
-  const orderId = String(queryParams.order_id || `budbee-test-${timestamp}`).trim();
+  const orderId = buildSafeNumericOrderId(
+    queryParams.order_id || timestamp
+  );
   const orderName = String(queryParams.order_name || `#BUDBEE-TEST-${timestamp}`).trim();
   const shopDomain = normalizeShopDomain(queryParams.shop_domain) || "shipone-test-2.myshopify.com";
   const merchantId = normalizeMerchantId(queryParams.merchant_id || "shipone-test-2");

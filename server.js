@@ -1201,10 +1201,10 @@ app.get("/admin/test/budbee/create", requireCronSecret, async (req, res) => {
         : null;
 
     const fulfillmentResult = {
-      success: false,
-      skipped: true,
-      reason: "Admin Budbee test route skips Shopify fulfillment on purpose"
-    };
+  success: true,
+  skipped: true,
+  reason: "Admin Budbee test route skips Shopify fulfillment on purpose"
+};
 
     await saveShipmentOutcome(
       testOrder,
@@ -1219,7 +1219,7 @@ app.get("/admin/test/budbee/create", requireCronSecret, async (req, res) => {
         tracking_number: trackingNumber,
         tracking_url: trackingUrl,
         shipment_success: shipmentResult.success,
-        fulfillment_success: false,
+        fulfillment_success: true,
         shipment_result: shipmentResult,
         fulfillment_result: fulfillmentResult,
         error: shipmentResult.success

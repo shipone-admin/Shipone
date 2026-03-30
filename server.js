@@ -369,6 +369,58 @@ function buildBudbeeDebugOrder(queryParams = {}) {
   };
 }
 
+function buildAdminBudbeeTestOrder(queryParams = {}) {
+  const timestamp = Date.now();
+  const orderId = String(queryParams.order_id || `budbee-test-${timestamp}`).trim();
+  const orderName = String(queryParams.order_name || `#BUDBEE-TEST-${timestamp}`).trim();
+  const shopDomain = normalizeShopDomain(queryParams.shop_domain) || "shipone-test-2.myshopify.com";
+  const merchantId = normalizeMerchantId(queryParams.merchant_id || "shipone-test-2");
+  const firstName = String(queryParams.first_name || "Ali").trim() || "Ali";
+  const lastName = String(queryParams.last_name || "Test").trim() || "Test";
+  const city = String(queryParams.city || "Stockholm").trim() || "Stockholm";
+  const zip = String(queryParams.zip || "11122").trim() || "11122";
+  const address1 = String(queryParams.address1 || "Testgatan 1").trim() || "Testgatan 1";
+  const address2 = String(queryParams.address2 || "").trim() || null;
+  const email = String(queryParams.email || "test@shipone.se").trim() || "test@shipone.se";
+  const phone = String(queryParams.phone || "").trim() || null;
+  const country = String(queryParams.country || "Sweden").trim() || "Sweden";
+  const countryCode = String(queryParams.country_code || "SE").trim().toUpperCase() || "SE";
+  const deliveryChoice = String(queryParams.choice || "CHEAP").trim().toUpperCase() || "CHEAP";
+
+  return {
+    id: orderId,
+    admin_test_order: true,
+    shop_domain: shopDomain,
+    merchant_id: merchantId,
+    name: orderName,
+    email,
+    phone,
+    note_attributes: [
+      {
+        name: "shipone_delivery",
+        value: deliveryChoice
+      }
+    ],
+    customer: {
+      first_name: firstName,
+      last_name: lastName,
+      email,
+      phone
+    },
+    shipping_address: {
+      first_name: firstName,
+      last_name: lastName,
+      address1,
+      address2,
+      city,
+      zip,
+      country,
+      country_code: countryCode,
+      phone
+    }
+  };
+}
+
 function buildStrategyMeta(strategyKey) {
   if (strategyKey === "FAST") {
     return {
@@ -1077,6 +1129,205 @@ app.get("/admin/debug/budbee/live", requireCronSecret, async (req, res) => {
   }
 });
 
+app.get("/admin/debug/network", requireCronSecret, async (req, res) => {
+  try {
+    let dnsOk = false;
+    let httpResult = null;
+    let error = null;
+
+    try {
+      const response = await axios.get("https://api.staging.budbee.com", {
+        timeout: 5000
+      });
+
+      dnsOk = true;
+      httpResult = {
+        status: response.status,
+        headers: response.headers
+      };
+    } catch (err) {
+      error = {
+        message: err.message,
+        code: err.code || null
+      };
+    }
+
+    return res.json({
+      success: true,
+      test: "budbee_dns_http",
+      dnsOk,
+      httpResult,
+      error
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    });
+  }
+});
+
+app.get("/admin/test/budbee/create", requireCronSecret, async (req, res) => {
+  const testOrder = buildAdminBudbeeTestOrder(req.query);
+
+  const merchantContext = await resolveMerchantContext({
+    explicitMerchantId: testOrder.merchant_id,
+    shopDomain: testOrder.shop_domain,
+    defaultMerchantId: normalizeMerchantId(
+      process.env.SHIPONE_DEFAULT_MERCHANT_ID || "default"
+    )
+  });
+
+  try {
+    console.log("🧪 Starting Budbee admin test order");
+    console.log("🧪 Test order id:", testOrder.id);
+    console.log("🧪 Test merchant:", merchantContext.merchant_id);
+    console.log("🧪 Test shop domain:", merchantContext.shop_domain || "unknown");
+
+    const state = await beginOrderProcessing(testOrder, merchantContext);
+
+    if (!state.started) {
+      return res.status(200).json({
+        success: false,
+        error: "Test order was already processed",
+        order: {
+          id: testOrder.id,
+          name: testOrder.name
+        },
+        merchantContext
+      });
+    }
+
+    const shippingOptions = await collectRates(testOrder);
+    const filteredShippingOptions = await filterRatesForMerchant(
+      shippingOptions,
+      merchantContext
+    );
+
+    const shipOneChoice = extractShipOneDeliveryChoice(testOrder);
+
+    const selectedOption = chooseBestOption(
+      filteredShippingOptions,
+      shipOneChoice.normalized
+    );
+
+    if (!selectedOption) {
+      await failOrderProcessing(
+        testOrder.id,
+        {
+          order_name: testOrder.name,
+          error: "No shipping option selected after merchant rate filtering"
+        },
+        merchantContext
+      );
+
+      return res.status(200).json({
+        success: false,
+        error: "No shipping option selected after merchant rate filtering",
+        order: {
+          id: testOrder.id,
+          name: testOrder.name
+        },
+        merchantContext,
+        shipone_choice: shipOneChoice.normalized,
+        rates_before_filter: shippingOptions.length,
+        rates_after_filter: filteredShippingOptions.length
+      });
+    }
+
+    const shipmentResult = await createShipment(
+      testOrder,
+      selectedOption,
+      merchantContext
+    );
+
+    const trackingNumber =
+      shipmentResult.success && shipmentResult.data
+        ? shipmentResult.data.trackingNumber || null
+        : null;
+
+    const trackingUrl =
+      shipmentResult.success && shipmentResult.data
+        ? shipmentResult.data.trackingUrl || null
+        : null;
+
+    const fulfillmentResult = {
+      success: false,
+      skipped: true,
+      reason: "Admin Budbee test route skips Shopify fulfillment on purpose"
+    };
+
+    await saveShipmentOutcome(
+      testOrder,
+      {
+        shipone_choice: shipOneChoice.normalized,
+        selected_option: selectedOption,
+        selected_carrier: selectedOption.carrier || null,
+        selected_service: selectedOption.name || null,
+        actual_carrier: shipmentResult.carrier || null,
+        fallback_used: shipmentResult.fallbackUsed || false,
+        fallback_from: shipmentResult.fallbackFrom || null,
+        tracking_number: trackingNumber,
+        tracking_url: trackingUrl,
+        shipment_success: shipmentResult.success,
+        fulfillment_success: false,
+        shipment_result: shipmentResult,
+        fulfillment_result: fulfillmentResult,
+        error: shipmentResult.success
+          ? null
+          : shipmentResult.error || "Shipment creation failed"
+      },
+      merchantContext
+    );
+
+    return res.status(200).json({
+      success: shipmentResult.success,
+      admin_test: true,
+      message: shipmentResult.success
+        ? "Budbee admin test shipment saved"
+        : "Budbee admin test shipment failed",
+      order: {
+        id: testOrder.id,
+        name: testOrder.name
+      },
+      merchantContext,
+      shipone_choice: shipOneChoice.normalized,
+      selected_option: selectedOption,
+      shipment_result: shipmentResult,
+      fulfillment_result: fulfillmentResult,
+      admin_urls: {
+        shipment_details: `/admin/shipment/${encodeURIComponent(testOrder.id)}`,
+        shipment_json: `/shipments/${encodeURIComponent(testOrder.id)}`,
+        dashboard: "/admin"
+      }
+    });
+  } catch (error) {
+    console.error("Budbee admin test route failed:", error.message);
+
+    if (testOrder && testOrder.id) {
+      await failOrderProcessing(
+        testOrder.id,
+        {
+          order_name: testOrder.name,
+          error: error.message
+        },
+        merchantContext
+      );
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: "Budbee admin test route failed",
+      details: error.message,
+      order: {
+        id: testOrder.id,
+        name: testOrder.name
+      },
+      merchantContext
+    });
+  }
+});
+
 app.get("/admin/test/dhl", requireCronSecret, async (req, res) => {
   return res.status(200).send(
     renderDHLTestPage({
@@ -1733,44 +1984,5 @@ async function startServer() {
     process.exit(1);
   }
 }
-app.get("/admin/debug/network", requireCronSecret, async (req, res) => {
-  try {
-    const axios = require("axios");
 
-    let dnsOk = false;
-    let httpResult = null;
-    let error = null;
-
-    try {
-      // testa HTTP direkt
-      const response = await axios.get("https://api.staging.budbee.com", {
-        timeout: 5000
-      });
-
-      dnsOk = true;
-      httpResult = {
-        status: response.status,
-        headers: response.headers
-      };
-    } catch (err) {
-      error = {
-        message: err.message,
-        code: err.code || null
-      };
-    }
-
-    return res.json({
-      success: true,
-      test: "budbee_dns_http",
-      dnsOk,
-      httpResult,
-      error
-    });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      error: err.message
-    });
-  }
-});
 startServer();

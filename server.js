@@ -18,9 +18,7 @@ const { saveCarrierTrackingSnapshot } = require("./services/trackingSyncStore");
 
 const {
   syncTrackingByTrackingNumber,
-  syncTrackingByOrderId,
-  syncPostNordTrackingByTrackingNumber,
-  syncPostNordTrackingByOrderId
+  syncTrackingByOrderId
 } = require("./services/trackingSyncService");
 
 const {
@@ -152,17 +150,9 @@ function matchesPolicyFilter(shipment, policyFilter) {
   const fallback = Boolean(shipment?.fallback_used);
   const policyOk = !blocked && !fallback;
 
-  if (normalized === "blocked") {
-    return blocked;
-  }
-
-  if (normalized === "fallback") {
-    return fallback;
-  }
-
-  if (normalized === "ok") {
-    return policyOk;
-  }
+  if (normalized === "blocked") return blocked;
+  if (normalized === "fallback") return fallback;
+  if (normalized === "ok") return policyOk;
 
   return true;
 }
@@ -185,23 +175,17 @@ function matchesAdminFilters(shipment, filters) {
 
   if (filters.status) {
     const shipmentStatus = String(shipment.status || "").toLowerCase();
-    if (shipmentStatus !== filters.status) {
-      return false;
-    }
+    if (shipmentStatus !== filters.status) return false;
   }
 
   if (filters.carrier) {
     const shipmentCarrier = String(shipment.actual_carrier || "").toLowerCase();
-    if (shipmentCarrier !== filters.carrier) {
-      return false;
-    }
+    if (shipmentCarrier !== filters.carrier) return false;
   }
 
   if (filters.merchant) {
     const shipmentMerchant = String(shipment.merchant_id || "").toLowerCase();
-    if (shipmentMerchant !== filters.merchant) {
-      return false;
-    }
+    if (shipmentMerchant !== filters.merchant) return false;
   }
 
   if (!matchesPolicyFilter(shipment, filters.policy)) {
@@ -244,35 +228,22 @@ function setPublicApiCors(res) {
 
 function formatCarrierLabel(carrier) {
   const normalized = String(carrier || "").toLowerCase();
-
   if (normalized === "postnord") return "PostNord";
   if (normalized === "dhl") return "DHL";
   if (normalized === "budbee") return "Budbee";
-
   return carrier || "-";
 }
 
 function formatEtaLabel(etaDays) {
   const value = Number(etaDays);
-
-  if (!Number.isFinite(value) || value <= 0) {
-    return "Okänd leveranstid";
-  }
-
-  if (value === 1) {
-    return "1 arbetsdag";
-  }
-
+  if (!Number.isFinite(value) || value <= 0) return "Okänd leveranstid";
+  if (value === 1) return "1 arbetsdag";
   return `${value} arbetsdagar`;
 }
 
 function formatPriceLabel(price) {
   const value = Number(price);
-
-  if (!Number.isFinite(value)) {
-    return "-";
-  }
-
+  if (!Number.isFinite(value)) return "-";
   return `${value} kr`;
 }
 
@@ -456,8 +427,7 @@ async function buildPreviewRateCard(option, merchantId) {
     ? await isShipmentCarrierEnabledForMerchant(merchantId, carrierKey)
     : false;
 
-  const shipmentAvailable =
-    shipmentGloballyAvailable && shipmentMerchantEnabled;
+  const shipmentAvailable = shipmentGloballyAvailable && shipmentMerchantEnabled;
 
   let shipmentBlockedReason = null;
 
@@ -488,12 +458,7 @@ async function buildPreviewRateCard(option, merchantId) {
   };
 }
 
-async function buildPreviewOption(
-  strategyKey,
-  selectedOption,
-  allRates,
-  merchantId
-) {
+async function buildPreviewOption(strategyKey, selectedOption, allRates, merchantId) {
   const meta = buildStrategyMeta(strategyKey);
 
   if (!selectedOption) {
@@ -551,10 +516,7 @@ async function buildShipOneRatePreview(merchantContext = {}) {
   const merchantId = normalizeMerchantId(merchantContext.merchant_id);
   const previewOrder = buildPreviewOrder();
   const shippingOptions = await collectRates(previewOrder);
-  const filteredOptions = await filterRatesForMerchant(
-    shippingOptions,
-    merchantContext
-  );
+  const filteredOptions = await filterRatesForMerchant(shippingOptions, merchantContext);
 
   const fastOption = chooseBestOption(filteredOptions, "FAST");
   const cheapOption = chooseBestOption(filteredOptions, "CHEAP");
@@ -564,26 +526,9 @@ async function buildShipOneRatePreview(merchantContext = {}) {
     filteredOptions.map((option) => buildPreviewRateCard(option, merchantId))
   );
 
-  const fastestPreview = await buildPreviewOption(
-    "FAST",
-    fastOption,
-    filteredOptions,
-    merchantId
-  );
-
-  const cheapestPreview = await buildPreviewOption(
-    "CHEAP",
-    cheapOption,
-    filteredOptions,
-    merchantId
-  );
-
-  const greenPreview = await buildPreviewOption(
-    "GREEN",
-    greenOption,
-    filteredOptions,
-    merchantId
-  );
+  const fastestPreview = await buildPreviewOption("FAST", fastOption, filteredOptions, merchantId);
+  const cheapestPreview = await buildPreviewOption("CHEAP", cheapOption, filteredOptions, merchantId);
+  const greenPreview = await buildPreviewOption("GREEN", greenOption, filteredOptions, merchantId);
 
   return {
     success: true,
@@ -629,13 +574,11 @@ async function isTrackingAllowedForShipment(shipment) {
   }
 
   const merchantId = normalizeMerchantId(shipment?.merchant_id || "default");
-
   return isTrackingCarrierEnabledForMerchant(merchantId, actualCarrier);
 }
 
 async function getLiveCarrierTrackingForShipment(shipment) {
   const actualCarrier = String(shipment?.actual_carrier || "").toLowerCase();
-
   const trackingAllowed = await isTrackingAllowedForShipment(shipment);
 
   if (!trackingAllowed) {
@@ -692,12 +635,7 @@ async function resolveMerchantContextFromRequest(req) {
   });
 }
 
-function renderDHLTestPage({
-  token,
-  createdShipment = null,
-  deletedShipment = null,
-  error = ""
-}) {
+function renderDHLTestPage({ token, createdShipment = null, deletedShipment = null, error = "" }) {
   const escapedToken = String(token || "")
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
@@ -1168,17 +1106,16 @@ app.get("/admin/debug/network", requireCronSecret, async (req, res) => {
 });
 
 app.get("/admin/test/budbee/create", requireCronSecret, async (req, res) => {
-  const testOrder = buildAdminBudbeeTestOrder(req.query);
-
-  const merchantContext = await resolveMerchantContext({
-    explicitMerchantId: testOrder.merchant_id,
-    shopDomain: testOrder.shop_domain,
-    defaultMerchantId: normalizeMerchantId(
-      process.env.SHIPONE_DEFAULT_MERCHANT_ID || "default"
-    )
-  });
-
   try {
+    const testOrder = buildAdminBudbeeTestOrder(req.query);
+
+    const merchantContext = {
+      merchant_id: normalizeMerchantId(testOrder.merchant_id || "shipone-test-2"),
+      shop_domain: normalizeShopDomain(testOrder.shop_domain) || "shipone-test-2.myshopify.com",
+      source: "admin_test",
+      merchant_name: null
+    };
+
     console.log("🧪 Starting Budbee admin test order");
     console.log("🧪 Test order id:", testOrder.id);
     console.log("🧪 Test merchant:", merchantContext.merchant_id);
@@ -1303,27 +1240,12 @@ app.get("/admin/test/budbee/create", requireCronSecret, async (req, res) => {
     });
   } catch (error) {
     console.error("Budbee admin test route failed:", error.message);
-
-    if (testOrder && testOrder.id) {
-      await failOrderProcessing(
-        testOrder.id,
-        {
-          order_name: testOrder.name,
-          error: error.message
-        },
-        merchantContext
-      );
-    }
+    console.error(error);
 
     return res.status(500).json({
       success: false,
       error: "Budbee admin test route failed",
-      details: error.message,
-      order: {
-        id: testOrder.id,
-        name: testOrder.name
-      },
-      merchantContext
+      details: error.message
     });
   }
 });

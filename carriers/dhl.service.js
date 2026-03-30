@@ -12,9 +12,11 @@ async function createDHLShipment(order) {
   // Här kommer OAuth + shipment call senare
 
   return {
-    labelUrl: "mock-label",
-    trackingNumber: "DHL123456789"
-  };
+  labelUrl: null,
+  trackingNumber: "DHL" + Date.now(),
+  provider: "dhl",
+  mode: "semi_live"
+};
 }
 
 module.exports = { createDHLShipment };

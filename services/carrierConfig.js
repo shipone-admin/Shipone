@@ -27,7 +27,7 @@ const carrierConfig = {
   budbee: {
     enabled: true,
     allowRates: true,
-    allowShipment: false,
+    allowShipment: true,
     allowTracking: false,
     label: "Budbee",
     status: "planned",

@@ -1,22 +1,51 @@
 // ========================================
-// DHL SERVICE STRUCTURE (READY FOR API)
+// DHL FREIGHT SERVICE (STEP 1: REAL CALL STRUCTURE)
 // ========================================
 
+const fetch = require("node-fetch");
+
 async function createDHLShipment(order) {
-  console.log("📦 DHL shipment placeholder");
+  console.log("📦 DHL Freight shipment start");
 
- if (!process.env.DHL_API_KEY) {
-  throw new Error("DHL API key missing");
-}
+  const API_KEY = process.env.DHL_API_KEY;
+  const API_SECRET = process.env.DHL_API_SECRET;
 
-  // Här kommer OAuth + shipment call senare
+  if (!API_KEY || !API_SECRET) {
+    throw new Error("DHL credentials missing");
+  }
 
-  return {
-  labelUrl: null,
-  trackingNumber: "DHL" + Date.now(),
-  provider: "dhl",
-  mode: "semi_live"
-};
+  // 🧪 TEST ENDPOINT (vi byter senare till riktig booking endpoint)
+  const url = "https://api-eu.dhl.com/track/shipments?trackingNumber=123";
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "DHL-API-Key": API_KEY,
+        "Accept": "application/json"
+      }
+    });
+
+    const data = await res.text();
+
+    console.log("📡 DHL response status:", res.status);
+
+    // 🔥 STEP 1: bara verifiera att API funkar
+    return {
+      success: true,
+      carrier: "dhl",
+      mode: "freight_step1",
+      data: {
+        trackingNumber: "DHL" + Date.now(),
+        rawTestResponse: data.slice(0, 200)
+      }
+    };
+
+  } catch (error) {
+    console.log("❌ DHL Freight error:", error.message);
+
+    throw new Error("DHL Freight API failed");
+  }
 }
 
 module.exports = { createDHLShipment };

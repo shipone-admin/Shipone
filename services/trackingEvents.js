@@ -134,16 +134,17 @@ function buildInternalTrackingEvents(shipment) {
   }
 
   if (shipment.fulfillment_success) {
-    events.push(
-      createEvent({
-        code: "fulfillment_completed",
-        title: "Fulfillment slutförd",
-        description: "Ordern har markerats som uppfylld i Shopify.",
-        occurredAt: getFulfillmentCompletedAt(shipment),
-        status: "done",
-        source: "shopify"
-      })
-    );
+  events.push({
+  title: shipment?.fulfillment_result?.skipped
+    ? "Fulfillment hoppades över"
+    : "Fulfillment slutförd",
+  description: shipment?.fulfillment_result?.skipped
+    ? "Shopify-fulfillment kördes inte eftersom detta är ett admin-test."
+    : "Ordern har markerats som uppfylld i Shopify.",
+  source: "shopify",
+  status: "done",
+  occurredAt: shipment.completed_at || shipment.updated_at || shipment.created_at
+});
   } else {
     events.push(
       createEvent({

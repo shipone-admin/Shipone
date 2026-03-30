@@ -5,9 +5,9 @@
 async function createDHLShipment(order) {
   console.log("📦 DHL shipment placeholder");
 
-  if (!process.env.DHL_CLIENT_ID) {
-    throw new Error("DHL credentials missing");
-  }
+ if (!process.env.DHL_API_KEY) {
+  throw new Error("DHL API key missing");
+}
 
   // Här kommer OAuth + shipment call senare
 
